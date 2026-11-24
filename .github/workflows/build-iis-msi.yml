@@ -182,28 +182,8 @@ jobs:
             Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
           }
 
-          # 4. Doplnění chybějící funkce ap_map_http_request_error pro IIS build
-          $stub = @"
-
-#include <apr_errno.h>
-#include <http_protocol.h>
-AP_DECLARE(int) ap_map_http_request_error(apr_status_t rv, int status)
-{
-    switch (rv) {
-        case APR_EGENERAL:
-            return HTTP_BAD_REQUEST;
-        case APR_ENOSPC:
-            return HTTP_REQUEST_ENTITY_TOO_LARGE;
-        case APR_ENOTIMPL:
-            return HTTP_NOT_IMPLEMENTED;
-        case APR_ETIMEDOUT:
-        case APR_TIMEUP:
-            return HTTP_REQUEST_TIME_OUT;
-        default:
-            return status;
-    }
-}
-"@
+          # 4. Doplnění chybějící funkce ap_map_http_request_error pro IIS build (jednořádkově)
+          $stub = "`r`n#include <apr_errno.h>`r`n#include <http_protocol.h>`r`nAP_DECLARE(int) ap_map_http_request_error(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n"
           Add-Content -Path "iis\api.c" -Value $stub
           Write-Host "Doplněna funkce ap_map_http_request_error do iis\api.c"
 
