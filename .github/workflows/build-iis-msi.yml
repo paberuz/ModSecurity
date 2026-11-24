@@ -57,9 +57,9 @@ jobs:
           $gh = "https://" + "github.com"
           $sfMirror = "https://" + "cfhcable.dl.sourceforge.net"
 
-          # 1. PCRE 8.45
+          # 1. PCRE2 10.42 (uloženo jako pcre-8.45.zip, aby ho build_dependencies.bat automaticky zkompiloval)
           Get-VerifiedFile "pcre-8.45.zip" @(
-            "$sfMirror/project/pcre/pcre/8.45/pcre-8.45.zip"
+            "$gh/PCRE2Project/pcre2/releases/download/pcre2-10.42/pcre2-10.42.zip"
           )
 
           # 2. Zlib 1.2.12
@@ -113,13 +113,12 @@ jobs:
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
           )
 
-          # 11. ssdeep 2.14.1 Windows binary (oficiální GitHub release ssdeep-2.14.1-win32-binary.zip)
+          # 11. ssdeep 2.14.1 Windows binary
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
-            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1-win32-binary.zip"
+            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.zip"
           )
 
-      - name: Detect Visual Studio and WiX paths & patch .bat scripts
-        working-directory: iis
+      - name: Patch VS, WiX and PCRE2 settings across build scripts
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -150,14 +149,28 @@ jobs:
             $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
           }
 
-          Get-ChildItem -Filter "*.bat" | ForEach-Object {
+          # Úprava cest k VS, WiX a přechod z pcre-8.45 na pcre2-10.42 v iis/*.bat
+          Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
             if ($wixBin) {
               $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
             }
+            $text = $text -replace 'pcre-8\.45', 'pcre2-10.42'
+            $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
+            $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
             Set-Content -Path $_.FullName -Value $text -NoNewline
+          }
+
+          # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
+          Get-ChildItem -Path "apache2", "iis" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
+            $text = Get-Content $_.FullName -Raw
+            $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
+            $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
+            $text = $text -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8'
+            Set-Content -Path $_.FullName -Value $text -NoNewline
+            Write-Host "Patched PCRE2 in $($_.FullName)"
           }
 
       - name: Build dependencies and ModSecurity
