@@ -186,10 +186,15 @@ jobs:
             Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
           }
 
-          # 4. Doplnění chybějící funkce ap_map_http_request_error přímo do apache2\apache2_io.c
-          $stub = "`r`nint ap_map_http_request_error(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n"
-          Add-Content -Path "apache2\apache2_io.c" -Value $stub
-          Write-Host "Doplněna funkce ap_map_http_request_error do apache2\apache2_io.c"
+         
+          
+          # 4. Přesměrování ap_map_http_request_error na vlastní funkci bez kolize s http_protocol.h
+          $ioContent = Get-Content "apache2\apache2_io.c" -Raw
+          $ioContent = $ioContent -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
+          $stub = "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n"
+          Set-Content -Path "apache2\apache2_io.c" -Value ($ioContent + $stub) -NoNewline
+          Write-Host "Funkce ap_map_http_request_error bezpečně přesměrována v apache2\apache2_io.c"
+
 
 
       - name: Build dependencies and ModSecurity
