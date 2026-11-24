@@ -207,8 +207,29 @@ jobs:
 
       - name: Build MSI installer
         working-directory: iis
-        shell: cmd
-        run: build_msi.bat
+        shell: pwsh
+        run: |
+          Write-Host "=== Obsah build_msi.bat ==="
+          Get-Content build_msi.bat
+          Write-Host "=== Nalezené .wxs soubory v iis/ ==="
+          Get-ChildItem -Filter "*.wxs" | Select-Object Name
+
+          # Pokud v iis/ existují další .wxs soubory (např. ModSec64.wxs, ModSec32.wxs), přidáme je do candle a light
+          $extraWxs = Get-ChildItem -Filter "*.wxs" | Where-Object { $_.Name -ne "installer.wxs" }
+          if ($extraWxs) {
+            $wxsList = ($extraWxs | ForEach-Object { "`"$_`"" }) -join " "
+            $wixObjList = ($extraWxs | ForEach-Object { "`"$($_.BaseName).wixobj`"" }) -join " "
+            $bat = Get-Content build_msi.bat -Raw
+            $bat = $bat -replace '(candle\.exe[^\r\n]*installer\.wxs"?)' , "`$1 $wxsList"
+            $bat = $bat -replace '(light\.exe[^\r\n]*installer\.wixobj"?)' , "`$1 $wixObjList"
+            Set-Content -Path build_msi.bat -Value $bat -NoNewline
+            Write-Host "=== Upravený build_msi.bat ==="
+            Get-Content build_msi.bat
+          }
+
+          cmd /c build_msi.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 
       - name: Upload MSI artifacts
         uses: actions/upload-artifact@v4
