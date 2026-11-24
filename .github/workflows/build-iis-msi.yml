@@ -150,14 +150,14 @@ jobs:
             $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
           }
 
-          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH před x86 buildem)
+          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH a úklid others\*.obj před x86 buildem)
           $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wixBin"
           Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
-            $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "del /q `"..\others\libinjection\src\*.obj`" 2>nul`r`nset `"PATH=$basePath`"`r`n`$1"
-
+            $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1"
+            $text = $text -replace 'Cleaning directories\.\.\.', "Cleaning directories...`r`ndel /s /q `"..\others\*.obj`" 2>nul"
             if ($wixBin) {
               $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
             }
@@ -167,17 +167,17 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
 
-
-
-          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8
+          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8 a úklid libinjection
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
             $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
             $text = $text -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8'
+            $text = $text -replace 'libinjection\\\*\.obj', 'libinjection\*.obj ..\others\libinjection\src\*.obj'
             Set-Content -Path $_.FullName -Value $text -NoNewline
             Write-Host "Patched PCRE2 in $($_.FullName)"
           }
+
 
           # 3. Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
           $libinjFile = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
