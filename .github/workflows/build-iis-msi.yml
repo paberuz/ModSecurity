@@ -15,25 +15,34 @@ jobs:
           ref: v2/master
           submodules: recursive
 
-      - name: Pre-download CMake 3.12.4 and inspect dependency scripts
+      - name: List all required archives in iis/*.bat and pre-download known ones
         working-directory: iis
         shell: pwsh
         run: |
+          Write-Host "=== VŠECHNY ODKAZY NA SOUBORY V IIS SKRIPTECH ==="
+          Get-ChildItem -Filter "*.bat" | Select-String -Pattern "Downloads|http|\.zip|\.tar|\.7z|\.msi" | ForEach-Object {
+            "$($_.Filename):$($_.LineNumber): $($_.Line.Trim())"
+          }
+          Write-Host "==============================================="
+
           $downloads = Join-Path $env:USERPROFILE "Downloads"
           New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 
-          # Stažení CMake 3.12.4 z oficiálního archivu cmake.org
+          # 1. CMake 3.12.4
           $cmakeDest = Join-Path $downloads "cmake-3.12.4-win32-x86.zip"
-          curl.exe -fL "https://cmake.org/files/v3.12/cmake-3.12.4-win32-x86.zip" -o $cmakeDest
-
-          # Okamžité ověření, že stažený soubor je platný ZIP archiv
+          curl.exe -fL "https://cmake.org" -o $cmakeDest
           7z t $cmakeDest
-          if ($LASTEXITCODE -ne 0) { throw "Stažený soubor cmake-3.12.4-win32-x86.zip není platný ZIP!" }
+          if ($LASTEXITCODE -ne 0) { throw "Neplatný archiv CMake" }
 
-          # Výpis obsahu download_files.bat (pokud existuje) pro přehled dalších závislostí
-          if (Test-Path "download_files.bat") {
-            Write-Host "--- download_files.bat ---"
-            Get-Content "download_files.bat"
+          # 2. Apache httpd-2.4.54-win64-VS16.zip (z archivu Apache Lounge)
+          $httpdDest = Join-Path $downloads "httpd-2.4.54-win64-VS16.zip"
+          curl.exe -fL -A "Mozilla/5.0" "https://apachelounge.com" -o $httpdDest
+          7z t $httpdDest
+          if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Hlavní URL selhala, zkouším archivní mirror..."
+            curl.exe -fL "https://web.archive.org/web/20221001000000id_/https://apachelounge.com" -o $httpdDest
+            7z t $httpdDest
+            if ($LASTEXITCODE -ne 0) { throw "Neplatný archiv httpd-2.4.54-win64-VS16.zip" }
           }
 
       - name: Detect Visual Studio and WiX paths & patch .bat scripts
