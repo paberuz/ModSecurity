@@ -55,12 +55,11 @@ jobs:
           }
 
           $gh = "https://" + "github.com"
-
-          # 1. PCRE 8.45 (zrcadlo na GitHubu a SourceForge CDN mirror sestavené z proměnných)
           $sfMirror = "https://" + "cfhcable.dl.sourceforge.net"
+
+          # 1. PCRE 8.45
           Get-VerifiedFile "pcre-8.45.zip" @(
-            "$sfMirror/project/pcre/pcre/8.45/pcre-8.45.zip",
-            "$gh/luvit/pcre/archive/refs/tags/8.45.zip"
+            "$sfMirror/project/pcre/pcre/8.45/pcre-8.45.zip"
           )
 
           # 2. Zlib 1.2.12
@@ -96,14 +95,12 @@ jobs:
           $wbHost = "https://" + "web.archive.org"
           $alHost = "https://" + "://apachelounge.com"
           Get-VerifiedFile "httpd-2.4.54-win32-VS16.zip" @(
-            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win32-VS16.zip",
-            "$alHost/download/VS16/binaries/httpd-2.4.54-win32-VS16.zip"
+            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win32-VS16.zip"
           )
 
           # 8. Apache httpd 2.4.54 Win64 VS16 binary
           Get-VerifiedFile "httpd-2.4.54-win64-VS16.zip" @(
-            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip",
-            "$alHost/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip"
+            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip"
           )
 
           # 9. YAJL 2.1.0
@@ -116,9 +113,9 @@ jobs:
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
           )
 
-          # 11. ssdeep 2.14.1 Windows binary
+          # 11. ssdeep 2.14.1 Windows binary (SourceForge CDN mirror)
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
-            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.zip"
+            "$sfMirror/project/ssdeep/ssdeep-2.14.1/ssdeep-2.14.1.zip"
           )
 
       - name: Detect Visual Studio and WiX paths & patch .bat scripts
