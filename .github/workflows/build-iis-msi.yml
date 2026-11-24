@@ -15,16 +15,27 @@ jobs:
           ref: v2/master
           submodules: recursive
 
-      - name: Nastavení MSVC kompilátoru
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
-      - name: Přidání WiX Toolsetu do PATH
-        shell: cmd
+      - name: Nalezení cesty k Visual Studio (vcvars) a WiX
+        shell: pwsh
         run: |
-          echo C:\Program Files (x86)\WiX Toolset v3.11\bin>> %GITHUB_PATH%
-          echo C:\Program Files (x86)\WiX Toolset v3.14\bin>> %GITHUB_PATH%
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
+          Write-Host "Nalezeno vcvars: $vcvars"
+          "VCARGS=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+          "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Úprava natvrdo zadané cesty v build_release.bat a build_msi.bat
+        working-directory: iis
+        shell: pwsh
+        run: |
+          Get-ChildItem -Filter "*.bat" | ForEach-Object {
+            $content = Get-Content $_.FullName
+            $content = $content -replace 'C:\\Program Files \(x86\)\\Microsoft Visual Studio\\2019\\Community\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $env:VCARGS
+            Set-Content $_.FullName $content
+          }
 
       - name: Kompilace závislostí a ModSecurity
         working-directory: iis
