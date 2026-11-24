@@ -156,7 +156,8 @@ jobs:
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
-            $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1"
+            $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "del /q `"..\others\libinjection\src\*.obj`" 2>nul`r`nset `"PATH=$basePath`"`r`n`$1"
+
             if ($wixBin) {
               $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
             }
