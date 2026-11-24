@@ -56,14 +56,15 @@ jobs:
 
           $gh = "https://github.com"
 
-          # 1. PCRE 8.45 (přes zrcadlo na GitHubu - nikdy neblokuje)
+          # 1. PCRE 8.45 (oficiální archiv Exim FTP a Gentoo distfiles)
           Get-VerifiedFile "pcre-8.45.zip" @(
-            "$gh/PCRE2Project/pcre/archive/refs/tags/pcre-8.45.zip",
-            "$gh/WinLibs/pcre/archive/refs/tags/pcre-8.45.zip"
+            "https://exim.org",
+            "https://gentoo.org"
           )
 
           # 2. Zlib 1.2.12
           Get-VerifiedFile "zlib-1.2.12.tar.gz" @(
+            "https://zlib.net",
             "$gh/madler/zlib/archive/refs/tags/v1.2.12.tar.gz"
           )
 
@@ -82,9 +83,9 @@ jobs:
             "$gh/curl/curl/releases/download/curl-7_83_1/curl-7.83.1.zip"
           )
 
-          # 6. Apache httpd 2.4.54 source
+          # 6. Apache httpd 2.4.54 source (oficiální release tarball z archive.apache.org)
           Get-VerifiedFile "httpd-2.4.54.tar.gz" @(
-            "$gh/apache/httpd/archive/refs/tags/2.4.54.tar.gz"
+            "https://apache.org"
           )
 
           # 7. Apache httpd 2.4.54 Win32 VS16 binary
