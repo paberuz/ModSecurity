@@ -55,14 +55,12 @@ jobs:
           }
 
           $gh = "https://" + "github.com"
-          $sfMirror = "https://" + "cfhcable.dl.sourceforge.net"
 
           # 1. PCRE2 10.42
           $pcre2File = "pcre2-10.42.zip"
           Get-VerifiedFile $pcre2File @(
             "$gh/PCRE2Project/pcre2/releases/download/pcre2-10.42/$pcre2File"
           )
-
 
           # 2. Zlib 1.2.12
           $zlibHost = "https://" + "zlib.net"
@@ -115,14 +113,13 @@ jobs:
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
           )
 
-          # 11. ssdeep 2.14.1 Windows binary (oficiální GitHub release ssdeep-2.14.1-win32-binary.zip)
+          # 11. ssdeep 2.14.1 Windows binary
           $ssdeepZipName = "ssdeep-2.14.1-win32-binary.zip"
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/$ssdeepZipName"
           )
 
-
-      - name: Patch VS, WiX and PCRE2 settings across build scripts
+      - name: Patch VS, WiX, PCRE2, libinjection and IIS API
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -153,7 +150,7 @@ jobs:
             $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
           }
 
-          # Úprava cest k VS, WiX a přechod z pcre-8.45 na pcre2-10.42 v iis/*.bat
+          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2)
           Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
@@ -167,7 +164,7 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
 
-          # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
+          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
@@ -177,7 +174,7 @@ jobs:
             Write-Host "Patched PCRE2 in $($_.FullName)"
           }
 
-          # Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
+          # 3. Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
           $libinjFile = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
           if ($libinjFile) {
             New-Item -ItemType Directory -Force -Path "apache2\libinjection" | Out-Null
@@ -185,6 +182,30 @@ jobs:
             Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
           }
 
+          # 4. Doplnění chybějící funkce ap_map_http_request_error pro IIS build
+          $stub = @"
+
+#include <apr_errno.h>
+#include <http_protocol.h>
+AP_DECLARE(int) ap_map_http_request_error(apr_status_t rv, int status)
+{
+    switch (rv) {
+        case APR_EGENERAL:
+            return HTTP_BAD_REQUEST;
+        case APR_ENOSPC:
+            return HTTP_REQUEST_ENTITY_TOO_LARGE;
+        case APR_ENOTIMPL:
+            return HTTP_NOT_IMPLEMENTED;
+        case APR_ETIMEDOUT:
+        case APR_TIMEUP:
+            return HTTP_REQUEST_TIME_OUT;
+        default:
+            return status;
+    }
+}
+"@
+          Add-Content -Path "iis\api.c" -Value $stub
+          Write-Host "Doplněna funkce ap_map_http_request_error do iis\api.c"
 
       - name: Build dependencies and ModSecurity
         working-directory: iis
