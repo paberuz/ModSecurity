@@ -167,7 +167,7 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
 
-      # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
+          # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
