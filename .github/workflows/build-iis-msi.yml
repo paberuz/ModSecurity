@@ -150,11 +150,12 @@ jobs:
             $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
           }
 
-          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2)
+          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH před x86 buildem)
+          $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wixBin"
           Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
-            $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
+            $text = $text -replace 'call "[^"]*vcvars32\.bat"', "set `"PATH=$basePath`"`r`ncall `"$vcvarsX86`""
             if ($wixBin) {
               $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
             }
@@ -163,6 +164,7 @@ jobs:
             $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
+
 
           # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
