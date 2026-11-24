@@ -5,7 +5,7 @@ on:
 
 jobs:
   build-msi:
-    runs-on: windows-latest
+    runs-on: windows-2022t
 
     steps:
       - name: Stažení zdrojových kódů (v2/master)
