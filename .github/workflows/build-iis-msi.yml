@@ -113,10 +113,12 @@ jobs:
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
           )
 
-          # 11. ssdeep 2.14.1 Windows binary
+          # 11. ssdeep 2.14.1 Windows binary (oficiální GitHub release ssdeep-2.14.1-win32-binary.zip)
+          $ssdeepZipName = "ssdeep-2.14.1-win32-binary.zip"
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
-            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.zip"
+            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/$ssdeepZipName"
           )
+
 
       - name: Patch VS, WiX and PCRE2 settings across build scripts
         shell: pwsh
