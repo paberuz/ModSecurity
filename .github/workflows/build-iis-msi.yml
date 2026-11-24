@@ -243,11 +243,6 @@ jobs:
           light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-          # 4. Sloučení do výsledného 32bitového MSI instalátoru
-          candle.exe -ext WixUtilExtension -ext WixUIExtension -arch x86 "installer.wxs"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-          light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload MSI artifacts
         uses: actions/upload-artifact@v4
