@@ -8,46 +8,82 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Stažení zdrojových kódů (v2/master)
+      - name: Checkout ModSecurity (v2/master)
         uses: actions/checkout@v4
         with:
           repository: owasp-modsecurity/ModSecurity
           ref: v2/master
           submodules: recursive
 
-      - name: Nalezení cesty k Visual Studio (vcvars) a WiX
+      - name: Pre-download CMake 3.12.4 and inspect dependencies
+        working-directory: iis
+        shell: pwsh
+        run: |
+          $downloads = Join-Path $env:USERPROFILE "Downloads"
+          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+
+          # Stažení požadovaného CMake 3.12.4 přímo z oficiálního archivu GitHubu
+          $cmakeDest = Join-Path $downloads "cmake-3.12.4-win32-x86.zip"
+          Invoke-WebRequest -Uri "https://github.com" -OutFile $cmakeDest
+          Write-Host "Staženo: $cmakeDest"
+
+          # Výpis všech URL a souborů v build_release.bat pro přehled dalších závislostí
+          Write-Host "--- Závislosti v build_release.bat ---"
+          Select-String -Path "build_release.bat" -Pattern "http|zip|tar|exe|msi" | ForEach-Object { $_.Line }
+
+      - name: Detect Visual Studio and WiX paths & patch .bat scripts
+        working-directory: iis
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $vcvars = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
-          Write-Host "Nalezeno vcvars: $vcvars"
-          "VCARGS=$vcvars" | Out-File -FilePath $env:GITHUB_ENV -Append
+          if (-not $vsPath) { throw "Visual Studio C++ build tools not found." }
 
-          "C:\Program Files (x86)\WiX Toolset v3.11\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
-          "C:\Program Files (x86)\WiX Toolset v3.14\bin" | Out-File -FilePath $env:GITHUB_PATH -Append
+          $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
+          $vcvarsX86 = Join-Path $vsPath "VC\Auxiliary\Build\vcvars32.bat"
 
-      - name: Úprava natvrdo zadané cesty v build_release.bat a build_msi.bat
-        working-directory: iis
-        shell: pwsh
-        run: |
-          Get-ChildItem -Filter "*.bat" | ForEach-Object {
-            $content = Get-Content $_.FullName
-            $content = $content -replace 'C:\\Program Files \(x86\)\\Microsoft Visual Studio\\2019\\Community\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $env:VCARGS
-            Set-Content $_.FullName $content
+          $wixBin = $null
+          $wixCandidates = @(
+            $env:WIX,
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.14",
+            "${env:ProgramFiles(x86)}\WiX Toolset v3.11"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+
+          foreach ($dir in $wixCandidates) {
+            if (Test-Path (Join-Path $dir "bin\candle.exe")) {
+              $wixBin = Join-Path $dir "bin"
+              break
+            } elseif (Test-Path (Join-Path $dir "candle.exe")) {
+              $wixBin = $dir
+              break
+            }
           }
 
-      - name: Kompilace závislostí a ModSecurity
+          if ($wixBin) {
+            $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
+          }
+
+          Get-ChildItem -Filter "*.bat" | ForEach-Object {
+            $text = Get-Content $_.FullName -Raw
+            $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
+            $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
+            if ($wixBin) {
+              $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
+            }
+            Set-Content -Path $_.FullName -Value $text -NoNewline
+          }
+
+      - name: Build dependencies and ModSecurity
         working-directory: iis
         shell: cmd
         run: build_release.bat
 
-      - name: Vytvoření MSI instalátoru
+      - name: Build MSI installer
         working-directory: iis
         shell: cmd
         run: build_msi.bat
 
-      - name: Nahrání výsledného MSI ke stažení
+      - name: Upload MSI artifacts
         uses: actions/upload-artifact@v4
         with:
           name: ModSecurity-IIS-MSI
