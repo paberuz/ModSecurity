@@ -21,7 +21,7 @@ jobs:
           $downloads = Join-Path $env:USERPROFILE "Downloads"
           New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 
-          # 0. Vytvoření cmake-3.12.4-win32-x86.zip přímo z CMake nainstalovaného na serveru
+          # 0. Vytvoření cmake-3.12.4-win32-x86.zip z lokálního CMake
           $localCmake = "C:\Program Files\CMake"
           $tempCmakeDir = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
           if (Test-Path $tempCmakeDir) { Remove-Item $tempCmakeDir -Recurse -Force }
@@ -39,7 +39,7 @@ jobs:
             foreach ($url in $Urls) {
               Write-Host "Stahuji $FileName z $url ..."
               try {
-                curl.exe -fsSL -A "Mozilla/5.0" "$url" -o "$dest"
+                curl.exe -fsSL -A "Wget/1.21.4" "$url" -o "$dest"
                 if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10000)) {
                   7z t $dest | Out-Null
                   if ($LASTEXITCODE -eq 0) {
@@ -48,68 +48,70 @@ jobs:
                   }
                 }
               } catch {
-                Write-Warning "Selhalo stažení z $url : $_"
+                Write-Warning "Selhalo stažení z $url"
               }
             }
             throw "Nepodařilo se stáhnout platný archiv: $FileName"
           }
 
-          # 1. PCRE 8.45
+          # 1. PCRE 8.45 (přímé mirrory mimo hlavní SourceForge bránu)
           Get-VerifiedFile "pcre-8.45.zip" @(
-            "https://sourceforge.net"
+            ("https://cfhcable.dl.sourceforge.net" + "/project/pcre/pcre/8.45/pcre-8.45.zip"),
+            ("https://netcologne.dl.sourceforge.net" + "/project/pcre/pcre/8.45/pcre-8.45.zip"),
+            ("https://exim.org" + "/pub/pcre/pcre-8.45.zip")
           )
 
           # 2. Zlib 1.2.12
           Get-VerifiedFile "zlib-1.2.12.tar.gz" @(
-            "https://zlib.net",
-            "https://github.com"
+            ("https://zlib.net" + "/fossils/zlib-1.2.12.tar.gz"),
+            ("https://github.com" + "/madler/zlib/archive/refs/tags/v1.2.12.tar.gz")
           )
 
           # 3. Libxml2 2.9.14
           Get-VerifiedFile "libxml2-2.9.14.tar.gz" @(
-            "https://gnome.org"
+            ("https://gnome.org" + "/GNOME/libxml2/-/archive/v2.9.14/libxml2-v2.9.14.tar.gz")
           )
 
           # 4. Lua 5.3.6
           Get-VerifiedFile "lua-5.3.6.tar.gz" @(
-            "https://lua.org"
+            ("https://lua.org" + "/ftp/lua-5.3.6.tar.gz")
           )
 
           # 5. Curl 7.83.1
           Get-VerifiedFile "curl-7.83.1.zip" @(
-            "https://github.com"
+            ("https://github.com" + "/curl/curl/releases/download/curl-7_83_1/curl-7.83.1.zip")
           )
 
           # 6. Apache httpd 2.4.54 source
           Get-VerifiedFile "httpd-2.4.54.tar.gz" @(
-            "https://apache.org"
+            ("https://apache.org" + "/dist/httpd/httpd-2.4.54.tar.gz")
           )
 
           # 7. Apache httpd 2.4.54 Win32 VS16 binary
           Get-VerifiedFile "httpd-2.4.54-win32-VS16.zip" @(
-            "https://archive.org",
-            "https://apachelounge.com"
+            ("https://archive.org" + "/web/20220901000000id_/https://apachelounge.com"),
+            ("https://apachelounge.com" + "/download/VS16/binaries/httpd-2.4.54-win32-VS16.zip")
           )
 
           # 8. Apache httpd 2.4.54 Win64 VS16 binary
           Get-VerifiedFile "httpd-2.4.54-win64-VS16.zip" @(
-            "https://archive.org",
-            "https://apachelounge.com"
+            ("https://archive.org" + "/web/20220901000000id_/https://apachelounge.com/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip"),
+            ("https://apachelounge.com" + "/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip")
           )
 
           # 9. YAJL 2.1.0
           Get-VerifiedFile "yajl-2.1.0.zip" @(
-            "https://github.com"
+            ("https://github.com" + "/lloyd/yajl/archive/refs/tags/2.1.0.zip")
           )
 
           # 10. ssdeep 2.14.1 source
           Get-VerifiedFile "ssdeep-2.14.1.tar.gz" @(
-            "https://github.com"
+            ("https://github.com" + "/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz")
           )
 
           # 11. ssdeep 2.14.1 Windows binary
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
-            "https://github.com"
+            ("https://github.com" + "/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.zip")
           )
 
       - name: Detect Visual Studio and WiX paths & patch .bat scripts
