@@ -182,10 +182,11 @@ jobs:
             Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
           }
 
-          # 4. Doplnění chybějící funkce ap_map_http_request_error (včetně __imp_ pro dllimport)
-          $stub = "`r`n#include <apr_errno.h>`r`n#include <http_protocol.h>`r`nint ap_map_http_request_error(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n#ifdef _WIN64`r`nvoid *__imp_ap_map_http_request_error = (void *)ap_map_http_request_error;`r`n#else`r`nvoid *_imp__ap_map_http_request_error = (void *)ap_map_http_request_error;`r`n#endif`r`n"
-          Add-Content -Path "iis\api.c" -Value $stub
-          Write-Host "Doplněna funkce ap_map_http_request_error včetně __imp_ do iis\api.c"
+          # 4. Doplnění chybějící funkce ap_map_http_request_error přímo do apache2\apache2_io.c
+          $stub = "`r`nint ap_map_http_request_error(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n"
+          Add-Content -Path "apache2\apache2_io.c" -Value $stub
+          Write-Host "Doplněna funkce ap_map_http_request_error do apache2\apache2_io.c"
+
 
       - name: Build dependencies and ModSecurity
         working-directory: iis
