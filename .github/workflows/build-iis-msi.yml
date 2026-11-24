@@ -15,11 +15,20 @@ jobs:
           ref: v2/master
           submodules: recursive
 
-      - name: Download and verify all 12 dependencies
+      - name: Prepare CMake archive locally and download remaining dependencies
         shell: pwsh
         run: |
           $downloads = Join-Path $env:USERPROFILE "Downloads"
           New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+
+          # 0. Vytvoření cmake-3.12.4-win32-x86.zip přímo z CMake nainstalovaného na serveru
+          $localCmake = "C:\Program Files\CMake"
+          $tempCmakeDir = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
+          if (Test-Path $tempCmakeDir) { Remove-Item $tempCmakeDir -Recurse -Force }
+          Copy-Item -Path $localCmake -Destination $tempCmakeDir -Recurse
+          $cmakeZip = Join-Path $downloads "cmake-3.12.4-win32-x86.zip"
+          Compress-Archive -Path $tempCmakeDir -DestinationPath $cmakeZip -Force
+          Write-Host "OK: Lokální CMake zabalen jako $cmakeZip"
 
           function Get-VerifiedFile {
             param(
@@ -30,7 +39,7 @@ jobs:
             foreach ($url in $Urls) {
               Write-Host "Stahuji $FileName z $url ..."
               try {
-                Invoke-WebRequest -Uri $url -OutFile $dest -UserAgent "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" -MaximumRedirection 10 -ErrorAction Stop
+                curl.exe -fsSL -A "Mozilla/5.0" "$url" -o "$dest"
                 if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10000)) {
                   7z t $dest | Out-Null
                   if ($LASTEXITCODE -eq 0) {
@@ -45,69 +54,60 @@ jobs:
             throw "Nepodařilo se stáhnout platný archiv: $FileName"
           }
 
-          # 1. CMake 3.12.4
-          Get-VerifiedFile "cmake-3.12.4-win32-x86.zip" @(
-            "https://cmake.org",
-            "https://web.archive.org/web/20230101000000id_/https://cmake.org"
-          )
-
-          # 2. PCRE 8.45
+          # 1. PCRE 8.45
           Get-VerifiedFile "pcre-8.45.zip" @(
-            "https://sourceforge.net",
             "https://sourceforge.net"
           )
 
-          # 3. Zlib 1.2.12
+          # 2. Zlib 1.2.12
           Get-VerifiedFile "zlib-1.2.12.tar.gz" @(
             "https://zlib.net",
             "https://github.com"
           )
 
-          # 4. Libxml2 2.9.14
+          # 3. Libxml2 2.9.14
           Get-VerifiedFile "libxml2-2.9.14.tar.gz" @(
-            "https://gnome.org",
             "https://gnome.org"
           )
 
-          # 5. Lua 5.3.6
+          # 4. Lua 5.3.6
           Get-VerifiedFile "lua-5.3.6.tar.gz" @(
             "https://lua.org"
           )
 
-          # 6. Curl 7.83.1
+          # 5. Curl 7.83.1
           Get-VerifiedFile "curl-7.83.1.zip" @(
-            "https://curl.se",
             "https://github.com"
           )
 
-          # 7. Apache httpd 2.4.54 source
+          # 6. Apache httpd 2.4.54 source
           Get-VerifiedFile "httpd-2.4.54.tar.gz" @(
             "https://apache.org"
           )
 
-          # 8. Apache httpd 2.4.54 Win32 VS16 binary (Apache Lounge archive)
+          # 7. Apache httpd 2.4.54 Win32 VS16 binary
           Get-VerifiedFile "httpd-2.4.54-win32-VS16.zip" @(
-            "https://apachelounge.com",
-            "https://web.archive.org/web/20220901000000id_/https://apachelounge.com"
+            "https://archive.org",
+            "https://apachelounge.com"
           )
 
-          # 9. Apache httpd 2.4.54 Win64 VS16 binary (Apache Lounge archive)
+          # 8. Apache httpd 2.4.54 Win64 VS16 binary
           Get-VerifiedFile "httpd-2.4.54-win64-VS16.zip" @(
-            "https://apachelounge.com",
-            "https://web.archive.org/web/20220901000000id_/https://apachelounge.com"
+            "https://archive.org",
+            "https://apachelounge.com"
           )
 
-          # 10. YAJL 2.1.0
+          # 9. YAJL 2.1.0
           Get-VerifiedFile "yajl-2.1.0.zip" @(
             "https://github.com"
           )
 
-          # 11. ssdeep 2.14.1 source
+          # 10. ssdeep 2.14.1 source
           Get-VerifiedFile "ssdeep-2.14.1.tar.gz" @(
             "https://github.com"
           )
 
-          # 12. ssdeep 2.14.1 Windows binary
+          # 11. ssdeep 2.14.1 Windows binary
           Get-VerifiedFile "ssdeep-2.14.1.zip" @(
             "https://github.com"
           )
