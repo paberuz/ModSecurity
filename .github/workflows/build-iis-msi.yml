@@ -15,21 +15,26 @@ jobs:
           ref: v2/master
           submodules: recursive
 
-      - name: Pre-download CMake 3.12.4 and inspect dependencies
+      - name: Pre-download CMake 3.12.4 and inspect dependency scripts
         working-directory: iis
         shell: pwsh
         run: |
           $downloads = Join-Path $env:USERPROFILE "Downloads"
           New-Item -ItemType Directory -Force -Path $downloads | Out-Null
 
-          # Stažení požadovaného CMake 3.12.4 přímo z oficiálního archivu GitHubu
+          # Stažení CMake 3.12.4 z oficiálního archivu cmake.org
           $cmakeDest = Join-Path $downloads "cmake-3.12.4-win32-x86.zip"
-          Invoke-WebRequest -Uri "https://github.com" -OutFile $cmakeDest
-          Write-Host "Staženo: $cmakeDest"
+          curl.exe -fL "https://cmake.org/files/v3.12/cmake-3.12.4-win32-x86.zip" -o $cmakeDest
 
-          # Výpis všech URL a souborů v build_release.bat pro přehled dalších závislostí
-          Write-Host "--- Závislosti v build_release.bat ---"
-          Select-String -Path "build_release.bat" -Pattern "http|zip|tar|exe|msi" | ForEach-Object { $_.Line }
+          # Okamžité ověření, že stažený soubor je platný ZIP archiv
+          7z t $cmakeDest
+          if ($LASTEXITCODE -ne 0) { throw "Stažený soubor cmake-3.12.4-win32-x86.zip není platný ZIP!" }
+
+          # Výpis obsahu download_files.bat (pokud existuje) pro přehled dalších závislostí
+          if (Test-Path "download_files.bat") {
+            Write-Host "--- download_files.bat ---"
+            Get-Content "download_files.bat"
+          }
 
       - name: Detect Visual Studio and WiX paths & patch .bat scripts
         working-directory: iis
