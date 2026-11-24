@@ -167,16 +167,18 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
 
-          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8 a úklid libinjection
+          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8 a sjednocení cesty k libinjection
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
             $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
             $text = $text -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8'
-            $text = $text -replace 'libinjection\\\*\.obj', 'libinjection\*.obj ..\others\libinjection\src\*.obj'
+            $text = $text -replace 'others/libinjection/src/', 'libinjection/'
+            $text = $text -replace 'others\\libinjection\\src\\', 'libinjection\'
             Set-Content -Path $_.FullName -Value $text -NoNewline
-            Write-Host "Patched PCRE2 in $($_.FullName)"
+            Write-Host "Patched PCRE2 & libinjection in $($_.FullName)"
           }
+
 
 
           # 3. Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
