@@ -209,27 +209,28 @@ jobs:
         working-directory: iis
         shell: pwsh
         run: |
-          Write-Host "=== Obsah build_msi.bat ==="
-          Get-Content build_msi.bat
-          Write-Host "=== Nalezené .wxs soubory v iis/ ==="
-          Get-ChildItem -Filter "*.wxs" | Select-Object Name
+          Write-Host "=== Struktura složky iis\release ==="
+          Get-ChildItem -Path "release" -Recurse | Select-Object FullName
 
-          # Pokud v iis/ existují další .wxs soubory (např. ModSec64.wxs, ModSec32.wxs), přidáme je do candle a light
-          $extraWxs = Get-ChildItem -Filter "*.wxs" | Where-Object { $_.Name -ne "installer.wxs" }
-          if ($extraWxs) {
-            $wxsList = ($extraWxs | ForEach-Object { "`"$_`"" }) -join " "
-            $wixObjList = ($extraWxs | ForEach-Object { "`"$($_.BaseName).wixobj`"" }) -join " "
-            $bat = Get-Content build_msi.bat -Raw
-            $bat = $bat -replace '(candle\.exe[^\r\n]*installer\.wxs"?)' , "`$1 $wxsList"
-            $bat = $bat -replace '(light\.exe[^\r\n]*installer\.wixobj"?)' , "`$1 $wixObjList"
-            Set-Content -Path build_msi.bat -Value $bat -NoNewline
-            Write-Host "=== Upravený build_msi.bat ==="
-            Get-Content build_msi.bat
-          }
+          # 1. Zjištění přesných názvů složek uvnitř release (amd64/x64 a x86/Win32)
+          $dir64 = if (Test-Path "release\amd64") { "release\amd64" } elseif (Test-Path "release\x64") { "release\x64" } else { "release" }
+          $dir32 = if (Test-Path "release\x86") { "release\x86" } elseif (Test-Path "release\Win32") { "release\Win32" } else { $dir64 }
 
-          cmd /c build_msi.bat
+          # 2. Vygenerování ModSec64.wxs a ModSec32.wxs pomocí WiX heat.exe
+          heat.exe dir "$dir64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
+          heat.exe dir "$dir32" -cg ModSec32Components -dr inetsrv32 -gg -sreg -srd -var var.ModSecurityIISRelease32 -out "ModSec32.wxs"
+
+          # 3. Kompilace a linkování 64bitového MSI (installer-64.msi)
+          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease64="$dir64" -dModSecurityIISRelease32="$dir32" -arch x64 "installer.wxs" "ModSec64.wxs" "ModSec32.wxs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+          # 4. Kompilace a linkování 32bitového MSI (installer-32.msi)
+          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease64="$dir64" -dModSecurityIISRelease32="$dir32" -arch x86 "installer.wxs" "ModSec64.wxs" "ModSec32.wxs"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Upload MSI artifacts
         uses: actions/upload-artifact@v4
