@@ -167,9 +167,8 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
           }
 
-                    # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
+      # Úprava Makefile.win a installer.wxs pro linkování pcre2-8
           Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
-
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
             $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
@@ -177,6 +176,15 @@ jobs:
             Set-Content -Path $_.FullName -Value $text -NoNewline
             Write-Host "Patched PCRE2 in $($_.FullName)"
           }
+
+          # Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
+          $libinjFile = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
+          if ($libinjFile) {
+            New-Item -ItemType Directory -Force -Path "apache2\libinjection" | Out-Null
+            Copy-Item -Path (Join-Path $libinjFile.DirectoryName "*") -Destination "apache2\libinjection" -Force
+            Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
+          }
+
 
       - name: Build dependencies and ModSecurity
         working-directory: iis
