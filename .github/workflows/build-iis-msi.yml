@@ -218,7 +218,7 @@ jobs:
           $ssdeepSrc = Get-ChildItem -Path $ssdeepBuild -Directory | Select-Object -First 1
 
           New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "unistd.h") -Force | Out-Null
-          New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "config.h") -Force | Out-Null
+          Set-Content -Path (Join-Path $ssdeepSrc.FullName "config.h") -Value "#include <stdio.h>`r`n#define fseeko _fseeki64`r`n#define ftello _ftelli64`r`n" -Force
 
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
