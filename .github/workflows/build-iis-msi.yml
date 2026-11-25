@@ -217,12 +217,15 @@ jobs:
           tar -xzf $ssdeepTar -C $ssdeepBuild
           $ssdeepSrc = Get-ChildItem -Path $ssdeepBuild -Directory | Select-Object -First 1
 
-          # Inicializace x64 kompilátoru a sestavení 64-bit fuzzy.dll
+          # Vytvoření prázdného unistd.h a config.h pro Windows kompilaci
+          New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "unistd.h") -Force | Out-Null
+          New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "config.h") -Force | Out-Null
+
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
 
-          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /DFUZZY_EXPORTS fuzzy.c edit_dist.c find-file-size.c /link /DEF:fuzzy.def /OUT:fuzzy64.dll"
+          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /I. fuzzy.c edit_dist.c find-file-size.c /link /DEF:fuzzy.def /OUT:fuzzy64.dll"
           $builtFuzzy64 = Join-Path $ssdeepSrc.FullName "fuzzy64.dll"
           if (Test-Path $builtFuzzy64) {
             Copy-Item $builtFuzzy64 "release\amd64\fuzzy.dll" -Force
@@ -230,6 +233,7 @@ jobs:
           } else {
             throw "Nepodařilo se zkompilovat 64-bit fuzzy.dll!"
           }
+
 
           # 2. Doplnění správné 64-bit a 32-bit pcre2-8.dll podle PE hlavičky
           $pcreAll = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse
