@@ -96,8 +96,9 @@ if (errstr && *errstr) {
 }
 "@
 
-# Vložíme zápis do souboru těsně před řádek s ReportEvent
-$api = [regex]::Replace($api, '(?m)^([ \t]*)(ReportEventA?\s*\()', "`$1$winWriteBlock`r`n`$1`$2")
+# Vložíme zápis do souboru těsně před celý řádek obsahující ReportEvent
+$api = [regex]::Replace($api, '(?m)^(.*ReportEventA?\s*\(.*)$', "$winWriteBlock`r`n`$1")
+
 Set-Content -Path $apiFile -Value $api -NoNewline
 
 # Ověření před kompilací
