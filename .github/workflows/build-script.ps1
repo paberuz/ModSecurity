@@ -79,10 +79,11 @@ Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven pro přímý zápis 
 
 
 $lt = Get-Content "apache2\msc_logging.c" -Raw
-$helper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_wlog(const char *p, const char *d, size_t l) { FILE *f; if(!p||!d||!l)return; if(p=='|')p++; f=_fsopen(p,`"ab`",_SH_DENYNO); if(f){fwrite(d,1,l,f);fflush(f);fclose(f);} }`r`n"
+$lt = $lt -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*return\s*;', '/* allow IIS direct write */'
+$helper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_wlog(const char *p, const char *d, size_t l) { FILE *f; if(!p||!d||!l)return; if(*p=='|')p++; f=_fsopen(p,`"ab`",_SH_DENYNO); if(f){fwrite(d,1,l,f);fflush(f);fclose(f);} }`r`n"
 $lt = $lt -replace '(#include\s+"msc_logging\.h")', "`$1`r`n$helper"
 $hook = "`r`n    if(msr&&msr->txcfg&&msr->txcfg->auditlog_name&&msr->error_messages&&msr->error_messages->nelts>0){int i;char h[1024];const char *uri=(msr->r&&msr->r->unparsed_uri)?msr->r->unparsed_uri:`"-`";const char *meth=(msr->r&&msr->r->method)?msr->r->method:`"-`";int n=_snprintf(h,sizeof(h),`"--%s-A--\r\n[%lld] %s %s %s\r\n--%s-H--\r\n`",msr->txid?msr->txid:`"0`",(long long)msr->request_time,msr->remote_addr?msr->remote_addr:`"-`",meth,uri,msr->txid?msr->txid:`"0`");if(n>0)iis_wlog(msr->txcfg->auditlog_name,h,(size_t)n);for(i=0;i<msr->error_messages->nelts;i++){const char *m=((const char**)msr->error_messages->elts)[i];if(m){iis_wlog(msr->txcfg->auditlog_name,m,strlen(m));iis_wlog(msr->txcfg->auditlog_name,`"\r\n`",2);}}iis_wlog(msr->txcfg->auditlog_name,`"--Z--\r\n\r\n`",7);}"
-$lt = $lt -replace '(void\s+sec_audit_logger\s*\(\s*modsec_rec\s*\*\s*msr\s*\)\s*\{)', "`$1$hook"
+$lt = [regex]::Replace($lt, '(void\s+sec_audit_logger\s*\(\s*modsec_rec\s*\*\s*msr\s*\)\s*\{)', "`$1$hook")
 Set-Content "apache2\msc_logging.c" $lt -NoNewline
 Write-Host "HOTOVO"
 
