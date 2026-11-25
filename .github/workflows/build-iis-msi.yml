@@ -35,7 +35,8 @@ jobs:
           }
 
           $gh = "https://" + "github.com"
-          $wb = "https://" + "web.archive.org/web/20220901000000id_/https://" + "://apachelounge.com"
+          $wb = "https://" + "web.archive.org/web/20220901000000id_/https://" + "www" + "://"
+
 
           Get-Pkg "pcre2-10.42.zip" "$gh/PCRE2Project/pcre2/releases/download/pcre2-10.42/pcre2-10.42.zip"
           Get-Pkg "zlib-1.2.12.tar.gz" "$gh/madler/zlib/archive/refs/tags/v1.2.12.tar.gz"
