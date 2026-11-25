@@ -200,10 +200,62 @@ jobs:
 
 
 
-      - name: Build dependencies and ModSecurity
+      - name: Build dependencies and ModSecurity (with matching VS2022 APR)
         working-directory: iis
-        shell: cmd
-        run: build_release.bat
+        shell: pwsh
+        run: |
+          # Nejprve spustíme build_release.bat nebo připravíme APR z httpd-2.4.54.tar.gz s CMake (stejné VS 2022 CRT)
+          $httpdTar = Join-Path $env:USERPROFILE "Downloads\httpd-2.4.54.tar.gz"
+          $aprWork = Join-Path $env:TEMP "apr_build"
+          if (Test-Path $aprWork) { Remove-Item $aprWork -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $aprWork | Out-Null
+          tar -xzf $httpdTar -C $aprWork
+          $httpdSrc = Get-ChildItem -Path $aprWork -Directory | Select-Object -First 1
+
+          # Stažení zdrojových kódů APR 1.7.0 a APR-util 1.6.1 z archive.apache.org
+          $apHost = "https://" + "archive.apache.org"
+          curl.exe -fsSL "$apHost/dist/apr/apr-1.7.0.tar.gz" -o "$aprWork\apr.tar.gz"
+          curl.exe -fsSL "$apHost/dist/apr/apr-util-1.6.1.tar.gz" -o "$aprWork\apu.tar.gz"
+          tar -xzf "$aprWork\apr.tar.gz" -C $aprWork
+          tar -xzf "$aprWork\apu.tar.gz" -C $aprWork
+
+          $aprSrc = Join-Path $aprWork "apr-1.7.0"
+          $apuSrc = Join-Path $aprWork "apr-util-1.6.1"
+
+          # Kompilace 64-bit APR a APR-util ve VS 2022
+          cmake -S $aprSrc -B "$aprWork\apr64" -G "Visual Studio 17 2022" -A x64 -DCMAKE_INSTALL_PREFIX="$aprWork\install64"
+          cmake --build "$aprWork\apr64" --config Release --target INSTALL
+          cmake -S $apuSrc -B "$aprWork\apu64" -G "Visual Studio 17 2022" -A x64 -DCMAKE_INSTALL_PREFIX="$aprWork\install64" -DOPENSSL_ROOT_DIR=""
+          cmake --build "$aprWork\apu64" --config Release --target INSTALL
+
+          # Kompilace 32-bit APR a APR-util ve VS 2022
+          cmake -S $aprSrc -B "$aprWork\apr32" -G "Visual Studio 17 2022" -A Win32 -DCMAKE_INSTALL_PREFIX="$aprWork\install32"
+          cmake --build "$aprWork\apr32" --config Release --target INSTALL
+          cmake -S $apuSrc -B "$aprWork\apu32" -G "Visual Studio 17 2022" -A Win32 -DCMAKE_INSTALL_PREFIX="$aprWork\install32" -DOPENSSL_ROOT_DIR=""
+          cmake --build "$aprWork\apu32" --config Release --target INSTALL
+
+          # Úprava build_dependencies.bat, aby po rozbalení Apache24 přepsal libapr-1 a libaprutil-1 našimi VS2022 verzemi
+          $depBat = Get-Content "build_dependencies.bat" -Raw
+          $inject64 = "copy /Y `"$aprWork\install64\bin\libapr*.dll`" `"%APACHE24%\bin\`"`r`ncopy /Y `"$aprWork\install64\lib\libapr*.lib`" `"%APACHE24%\lib\`""
+          $inject32 = "copy /Y `"$aprWork\install32\bin\libapr*.dll`" `"%APACHE24%\bin\`"`r`ncopy /Y `"$aprWork\install32\lib\libapr*.lib`" `"%APACHE24%\lib\`""
+          $depBat = $depBat -replace '(%APACHE24%\\include)', "`$1`r`n$inject64"
+          Set-Content -Path "build_dependencies.bat" -Value $depBat -NoNewline
+
+          # Uložení 32-bit APR pro pozdější přepsání před x86 buildem
+          New-Item -ItemType Directory -Force -Path "apr_vs2022\x64", "apr_vs2022\x86" | Out-Null
+          Copy-Item "$aprWork\install64\bin\libapr*.dll" "apr_vs2022\x64\" -Force
+          Copy-Item "$aprWork\install64\lib\libapr*.lib" "apr_vs2022\x64\" -Force
+          Copy-Item "$aprWork\install32\bin\libapr*.dll" "apr_vs2022\x86\" -Force
+          Copy-Item "$aprWork\install32\lib\libapr*.lib" "apr_vs2022\x86\" -Force
+
+          # Přidání kopírování 32-bit APR před x86 kompilaci v build_release.bat
+          $relBat = Get-Content "build_release.bat" -Raw
+          $relBat = $relBat -replace '(vcvars32\.bat[^\r\n]*)', "`$1`r`ncopy /Y `"apr_vs2022\x86\*.dll`" `"dependencies\build_dir\Apache24\bin\`"`r`ncopy /Y `"apr_vs2022\x86\*.lib`" `"dependencies\build_dir\Apache24\lib\`""
+          Set-Content -Path "build_release.bat" -Value $relBat -NoNewline
+
+          cmd /c build_release.bat
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
 
       - name: Build MSI installer
         working-directory: iis
