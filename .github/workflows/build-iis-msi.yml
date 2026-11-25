@@ -15,193 +15,134 @@ jobs:
           ref: v2/master
           submodules: recursive
 
-      - name: Prepare CMake archive locally and download remaining dependencies
+      - name: Download dependencies
         shell: pwsh
         run: |
-          $downloads = Join-Path $env:USERPROFILE "Downloads"
-          New-Item -ItemType Directory -Force -Path $downloads | Out-Null
+          $dl = Join-Path $env:USERPROFILE "Downloads"
+          New-Item -ItemType Directory -Force -Path $dl | Out-Null
 
-          # 0. Vytvoření cmake-3.12.4-win32-x86.zip z lokálního CMake
-          $localCmake = "C:\Program Files\CMake"
-          $tempCmakeDir = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
-          if (Test-Path $tempCmakeDir) { Remove-Item $tempCmakeDir -Recurse -Force }
-          Copy-Item -Path $localCmake -Destination $tempCmakeDir -Recurse
-          $cmakeZip = Join-Path $downloads "cmake-3.12.4-win32-x86.zip"
-          Compress-Archive -Path $tempCmakeDir -DestinationPath $cmakeZip -Force
-          Write-Host "OK: Lokální CMake zabalen jako $cmakeZip"
+          $tmpCm = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
+          if (Test-Path $tmpCm) { Remove-Item $tmpCm -Recurse -Force }
+          Copy-Item "C:\Program Files\CMake" $tmpCm -Recurse
+          Compress-Archive $tmpCm (Join-Path $dl "cmake-3.12.4-win32-x86.zip") -Force
 
-          function Get-VerifiedFile {
-            param(
-              [string]$FileName,
-              [string[]]$Urls
-            )
-            $dest = Join-Path $downloads $FileName
-            foreach ($url in $Urls) {
-              Write-Host "Stahuji $FileName z $url ..."
-              try {
-                curl.exe -fsSL -A "Wget/1.21.4" "$url" -o "$dest"
-                if ((Test-Path $dest) -and ((Get-Item $dest).Length -gt 10000)) {
-                  7z t $dest | Out-Null
-                  if ($LASTEXITCODE -eq 0) {
-                    Write-Host "OK: $FileName ověřen ($([math]::Round((Get-Item $dest).Length / 1MB, 2)) MB)"
-                    return
-                  }
-                }
-              } catch {
-                Write-Warning "Selhalo stažení z $url"
-              }
-            }
-            throw "Nepodařilo se stáhnout platný archiv: $FileName"
+          function Get-Pkg($f, $u) {
+            $d = Join-Path $dl $f
+            curl.exe -fsSL -A "Wget/1.21.4" "$u" -o "$d"
+            7z t $d | Out-Null
+            if ($LASTEXITCODE -ne 0) { throw "Chyba stažení: $f" }
+            Write-Host "OK: $f"
           }
 
           $gh = "https://" + "github.com"
+          $wb = "https://" + "web.archive.org/web/20220901000000id_/https://" + "://apachelounge.com"
 
-          # 1. PCRE2 10.42
-          $pcre2File = "pcre2-10.42.zip"
-          Get-VerifiedFile $pcre2File @(
-            "$gh/PCRE2Project/pcre2/releases/download/pcre2-10.42/$pcre2File"
-          )
+          Get-Pkg "pcre2-10.42.zip" "$gh/PCRE2Project/pcre2/releases/download/pcre2-10.42/pcre2-10.42.zip"
+          Get-Pkg "zlib-1.2.12.tar.gz" "$gh/madler/zlib/archive/refs/tags/v1.2.12.tar.gz"
+          Get-Pkg "libxml2-2.9.14.tar.gz" "$gh/GNOME/libxml2/archive/refs/tags/v2.9.14.tar.gz"
+          Get-Pkg "lua-5.3.6.tar.gz" ("https://" + "www.lua.org/ftp/lua-5.3.6.tar.gz")
+          Get-Pkg "curl-7.83.1.zip" "$gh/curl/curl/releases/download/curl-7_83_1/curl-7.83.1.zip"
+          Get-Pkg "httpd-2.4.54.tar.gz" ("https://" + "archive.apache.org/dist/httpd/httpd-2.4.54.tar.gz")
+          Get-Pkg "httpd-2.4.54-win32-VS16.zip" "$wb/httpd-2.4.54-win32-VS16.zip"
+          Get-Pkg "httpd-2.4.54-win64-VS16.zip" "$wb/httpd-2.4.54-win64-VS16.zip"
+          Get-Pkg "yajl-2.1.0.zip" "$gh/lloyd/yajl/archive/refs/tags/2.1.0.zip"
+          Get-Pkg "ssdeep-2.14.1.tar.gz" "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
+          Get-Pkg "ssdeep-2.14.1.zip" "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1-win32-binary.zip"
 
-          # 2. Zlib 1.2.12
-          $zlibHost = "https://" + "zlib.net"
-          Get-VerifiedFile "zlib-1.2.12.tar.gz" @(
-            "$zlibHost/fossils/zlib-1.2.12.tar.gz",
-            "$gh/madler/zlib/archive/refs/tags/v1.2.12.tar.gz"
-          )
-
-          # 3. Libxml2 2.9.14
-          Get-VerifiedFile "libxml2-2.9.14.tar.gz" @(
-            "$gh/GNOME/libxml2/archive/refs/tags/v2.9.14.tar.gz"
-          )
-
-          # 4. Lua 5.3.6
-          $luaHost = "https://" + "www.lua.org"
-          Get-VerifiedFile "lua-5.3.6.tar.gz" @(
-            "$luaHost/ftp/lua-5.3.6.tar.gz"
-          )
-
-          # 5. Curl 7.83.1
-          Get-VerifiedFile "curl-7.83.1.zip" @(
-            "$gh/curl/curl/releases/download/curl-7_83_1/curl-7.83.1.zip"
-          )
-
-          # 6. Apache httpd 2.4.54 source
-          $apacheHost = "https://" + "archive.apache.org"
-          Get-VerifiedFile "httpd-2.4.54.tar.gz" @(
-            "$apacheHost/dist/httpd/httpd-2.4.54.tar.gz"
-          )
-
-          # 7. Apache httpd 2.4.54 Win32 VS16 binary
-          $wbHost = "https://" + "web.archive.org"
-          $alHost = "https://" + "://apachelounge.com"
-          Get-VerifiedFile "httpd-2.4.54-win32-VS16.zip" @(
-            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win32-VS16.zip"
-          )
-
-          # 8. Apache httpd 2.4.54 Win64 VS16 binary
-          Get-VerifiedFile "httpd-2.4.54-win64-VS16.zip" @(
-            "$wbHost/web/20220901000000id_/$alHost/download/VS16/binaries/httpd-2.4.54-win64-VS16.zip"
-          )
-
-          # 9. YAJL 2.1.0
-          Get-VerifiedFile "yajl-2.1.0.zip" @(
-            "$gh/lloyd/yajl/archive/refs/tags/2.1.0.zip"
-          )
-
-          # 10. ssdeep 2.14.1 source
-          Get-VerifiedFile "ssdeep-2.14.1.tar.gz" @(
-            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/ssdeep-2.14.1.tar.gz"
-          )
-
-          # 11. ssdeep 2.14.1 Windows binary
-          $ssdeepZipName = "ssdeep-2.14.1-win32-binary.zip"
-          Get-VerifiedFile "ssdeep-2.14.1.zip" @(
-            "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/$ssdeepZipName"
-          )
-
-      - name: Patch VS, WiX, PCRE2, libinjection, IIS API and AuditLog
+      - name: Patch scripts and IIS AuditLog
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          if (-not $vsPath) { throw "Visual Studio C++ build tools not found." }
+          $vc64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
+          $vc32 = Join-Path $vsPath "VC\Auxiliary\Build\vcvars32.bat"
+          $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
+          if (-not (Test-Path $wix)) { $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin" }
+          $wix | Out-File $env:GITHUB_PATH -Append
 
-          $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
-          $vcvarsX86 = Join-Path $vsPath "VC\Auxiliary\Build\vcvars32.bat"
-
-          $wixBin = $null
-          $wixCandidates = @(
-            $env:WIX,
-            "${env:ProgramFiles(x86)}\WiX Toolset v3.14",
-            "${env:ProgramFiles(x86)}\WiX Toolset v3.11"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-
-          foreach ($dir in $wixCandidates) {
-            if (Test-Path (Join-Path $dir "bin\candle.exe")) {
-              $wixBin = Join-Path $dir "bin"
-              break
-            } elseif (Test-Path (Join-Path $dir "candle.exe")) {
-              $wixBin = $dir
-              break
-            }
+          $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wix"
+          Get-ChildItem "iis\*.bat" | ForEach-Object {
+            $t = (Get-Content $_.FullName -Raw) `
+              -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vc64 `
+              -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vc32 `
+              -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1" `
+              -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wix `
+              -replace 'pcre-8\.45', 'pcre2-10.42' -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll'
+            Set-Content $_.FullName $t -NoNewline
           }
 
-          if ($wixBin) {
-            $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
+          Get-ChildItem "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
+            $t = (Get-Content $_.FullName -Raw) `
+              -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll' `
+              -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8' `
+              -replace 'others/libinjection/src/', 'libinjection/' -replace 'others\\libinjection\\src\\', 'libinjection\'
+            Set-Content $_.FullName $t -NoNewline
           }
 
-          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH před x86 buildem)
-          $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wixBin"
-          Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
-            $text = Get-Content $_.FullName -Raw
-            $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
-            $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
-            $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1"
-            if ($wixBin) {
-              $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
-            }
-            $text = $text -replace 'pcre-8\.45', 'pcre2-10.42'
-            $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
-            $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
-            Set-Content -Path $_.FullName -Value $text -NoNewline
-          }
-
-          # 2. Úprava Makefile.win a installer.wxs pro linkování pcre2-8 a sjednocení cesty k libinjection
-          Get-ChildItem -Path "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
-            $text = Get-Content $_.FullName -Raw
-            $text = $text -replace 'pcre\.lib', 'pcre2-8.lib'
-            $text = $text -replace 'pcre\.dll', 'pcre2-8.dll'
-            $text = $text -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8'
-            $text = $text -replace 'others/libinjection/src/', 'libinjection/'
-            $text = $text -replace 'others\\libinjection\\src\\', 'libinjection\'
-            Set-Content -Path $_.FullName -Value $text -NoNewline
-            Write-Host "Patched PCRE2 & libinjection in $($_.FullName)"
-          }
-
-          # 3. Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
-          $libinjFile = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
-          if ($libinjFile) {
+          $li = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
+          if ($li) {
             New-Item -ItemType Directory -Force -Path "apache2\libinjection" | Out-Null
-            Copy-Item -Path (Join-Path $libinjFile.DirectoryName "*") -Destination "apache2\libinjection" -Force
-            Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
+            Copy-Item (Join-Path $li.DirectoryName "*") "apache2\libinjection" -Force
           }
 
-          # 4. Přesměrování ap_map_http_request_error na vlastní funkci bez kolize s http_protocol.h
-          $ioContent = Get-Content "apache2\apache2_io.c" -Raw
-          $ioContent = $ioContent -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
-          $stub = "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int status) { switch (rv) { case APR_EGENERAL: return HTTP_BAD_REQUEST; case APR_ENOSPC: return HTTP_REQUEST_ENTITY_TOO_LARGE; case APR_ENOTIMPL: return HTTP_NOT_IMPLEMENTED; case APR_ETIMEDOUT: case APR_TIMEUP: return HTTP_REQUEST_TIME_OUT; default: return status; } }`r`n"
-          Set-Content -Path "apache2\apache2_io.c" -Value ($ioContent + $stub) -NoNewline
-          Write-Host "Funkce ap_map_http_request_error bezpečně přesměrována v apache2\apache2_io.c"
+          $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
+          $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
+          Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-          # 5. Nativní Windows zápis pro SecAuditLog napříč všemi soubory v apache2/ a iis/
-          Get-ChildItem -Path "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
+          Get-ChildItem "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
             $c = Get-Content $_.FullName -Raw
             if ($c -match "Command failed to execute|Failed to open the audit log file") {
-              Write-Host "Nalezena kontrola audit logu v: $($_.FullName)"
-              $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed Command failed */')
-              $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed Failed to open */')
-              Set-Content -Path $_.FullName -Value $c -NoNewline
-              Write-Host "Opraveno v: $($_.FullName)"
+              $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed */')
+              $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed */')
+              Set-Content $_.FullName $c -NoNewline
             }
           }
 
+          $lt = Get-Content "apache2\msc_logging.c" -Raw
+          $helper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_wlog(const char *p, const char *d, size_t l) { FILE *f; if(!p||!d||!l)return; if(p=='|')p++; f=_fsopen(p,`"ab`",_SH_DENYNO); if(f){fwrite(d,1,l,f);fflush(f);fclose(f);} }`r`n"
+          $lt = $lt -replace '(#include\s+"msc_logging\.h")', "`$1`r`n$helper"
+          $hook = "`r`n    if(msr&&msr->txcfg&&msr->txcfg->auditlog_name&&msr->error_messages&&msr->error_messages->nelts>0){int i;char h;int n=_snprintf(h,sizeof(h),`"--%s-A--\r\n[%s] %s %s %s\r\n--%s-H--\r\n`",msr->txid?msr->txid:`"0`",msr->request_time?msr->request_time:`"-`",msr->remote_addr?msr->remote_addr:`"-`",msr->request_method?msr->request_method:`"-`",msr->unparsed_uri?msr->unparsed_uri:`"-`",msr->txid?msr->txid:`"0`");if(n>0)iis_wlog(msr->txcfg->auditlog_name,h,n);for(i=0;i<msr->error_messages->nelts;i++){const char *m=((const char**)msr->error_messages->elts)[i];if(m){iis_wlog(msr->txcfg->auditlog_name,m,strlen(m));iis_wlog(msr->txcfg->auditlog_name,`"\r\n`",2);}}iis_wlog(msr->txcfg->auditlog_name,`"--Z--\r\n\r\n`",7);}"
+          $lt = $lt -replace '(void\s+sec_audit_logger\s*\(\s*modsec_rec\s*\*\s*msr\s*\)\s*\{)', "`$1$hook"
+          Set-Content "apache2\msc_logging.c" $lt -NoNewline
+
+      - name: Build ModSecurity
+        working-directory: iis
+        shell: cmd
+        run: build_release.bat
+
+      - name: Build MSI
+        working-directory: iis
+        shell: pwsh
+        run: |
+          $ssTar = Join-Path $env:USERPROFILE "Downloads\ssdeep-2.14.1.tar.gz"
+          $ssDir = Join-Path $env:TEMP "ssdeep64"
+          if (Test-Path $ssDir) { Remove-Item $ssDir -Recurse -Force }
+          New-Item -ItemType Directory -Force -Path $ssDir | Out-Null
+          tar -xzf $ssTar -C $ssDir
+          $src = Get-ChildItem $ssDir -Directory | Select-Object -First 1
+          New-Item -ItemType File (Join-Path $src.FullName "unistd.h") -Force | Out-Null
+          New-Item -ItemType File (Join-Path $src.FullName "config.h") -Force | Out-Null
+
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+          $vc64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
+          cmd /c "`"$vc64`" && cd /d `"$($src.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /Dfseeko=_fseeki64 /Dftello=_ftelli64 /I. fuzzy.c edit_dist.c find-file-size.c /link /OUT:fuzzy64.dll"
+          Copy-Item (Join-Path $src.FullName "fuzzy64.dll") "release\amd64\fuzzy.dll" -Force
+
+          $p64 = Join-Path $env:TEMP "pcre64"
+          7z e (Join-Path $env:USERPROFILE "Downloads\httpd-2.4.54-win64-VS16.zip") "Apache24\bin\pcre2-8.dll" -o"$p64" -y | Out-Null
+          Copy-Item (Join-Path $p64 "pcre2-8.dll") "release\amd64\pcre2-8.dll" -Force
+          $p32 = Get-ChildItem "dependencies" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
+          if ($p32) { Copy-Item $p32.FullName "release\x86\pcre2-8.dll" -Force }
+
+          heat.exe dir "release\amd64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
+          heat.exe dir "release\x86" -cg ModSec32Components -dr inetsrv32 -gg -sreg -srd -var var.ModSecurityIISRelease32 -out "ModSec32.wxs"
+          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease64="release\amd64" -arch x64 "installer.wxs" "ModSec64.wxs"
+          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "ModSec32.wxs"
+          light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
+
+      - name: Upload MSI
+        uses: actions/upload-artifact@v4
+        with:
+          name: ModSecurity-IIS-MSI
+          path: iis/**/*.msi
