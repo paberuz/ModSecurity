@@ -8,17 +8,18 @@ jobs:
     runs-on: windows-2022
 
     steps:
-      - name: Checkout scripts
-        uses: actions/checkout@v4
-        with:
-          path: scripts
-
       - name: Checkout ModSecurity (v2/master)
         uses: actions/checkout@v4
         with:
           repository: owasp-modsecurity/ModSecurity
           ref: v2/master
           submodules: recursive
+
+      - name: Checkout scripts
+        uses: actions/checkout@v4
+        with:
+          path: scripts
+
 
       - name: Prepare and Patch
         shell: pwsh
