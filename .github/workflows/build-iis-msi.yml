@@ -217,7 +217,6 @@ jobs:
           tar -xzf $ssdeepTar -C $ssdeepBuild
           $ssdeepSrc = Get-ChildItem -Path $ssdeepBuild -Directory | Select-Object -First 1
 
-          # Vytvoření prázdného unistd.h a config.h pro Windows kompilaci
           New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "unistd.h") -Force | Out-Null
           New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "config.h") -Force | Out-Null
 
@@ -225,43 +224,40 @@ jobs:
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
 
-          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /I. fuzzy.c edit_dist.c find-file-size.c /link /DEF:fuzzy.def /OUT:fuzzy64.dll"
+          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /I. fuzzy.c edit_dist.c find-file-size.c /link /OUT:fuzzy64.dll"
           $builtFuzzy64 = Join-Path $ssdeepSrc.FullName "fuzzy64.dll"
-          if (Test-Path $builtFuzzy64) {
-            Copy-Item $builtFuzzy64 "release\amd64\fuzzy.dll" -Force
-            Write-Host "OK: 64-bit fuzzy.dll zkompilována a zkopírována do release\amd64\"
-          } else {
-            throw "Nepodařilo se zkompilovat 64-bit fuzzy.dll!"
-          }
+          if (-not (Test-Path $builtFuzzy64)) { throw "Nepodařilo se zkompilovat 64-bit fuzzy.dll!" }
+          Copy-Item $builtFuzzy64 "release\amd64\fuzzy.dll" -Force
+          Write-Host "OK: 64-bit fuzzy.dll zkompilována a zkopírována do release\amd64\"
 
+          # 2. Extrakce 64-bit pcre2-8.dll přímo z archivu httpd-2.4.54-win64-VS16.zip a 32-bit z build_dir
+          $httpd64Zip = Join-Path $env:USERPROFILE "Downloads\httpd-2.4.54-win64-VS16.zip"
+          $pcre64Temp = Join-Path $env:TEMP "pcre64_extract"
+          if (Test-Path $pcre64Temp) { Remove-Item $pcre64Temp -Recurse -Force }
+          7z e $httpd64Zip "Apache24\bin\pcre2-8.dll" -o"$pcre64Temp" -y | Out-Null
+          Copy-Item (Join-Path $pcre64Temp "pcre2-8.dll") "release\amd64\pcre2-8.dll" -Force
+          Write-Host "OK: 64-bit pcre2-8.dll vytažena z httpd-2.4.54-win64-VS16.zip"
 
-          # 2. Doplnění správné 64-bit a 32-bit pcre2-8.dll podle PE hlavičky
-          $pcreAll = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse
-          foreach ($dll in $pcreAll) {
-            $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
-            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
-            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
-            if ($machine -eq 0x8664) {
-              Copy-Item $dll.FullName "release\amd64\pcre2-8.dll" -Force
-              Write-Host "OK: 64-bit pcre2-8.dll zkopírována z $($dll.FullName)"
-            } elseif ($machine -eq 0x014c) {
-              Copy-Item $dll.FullName "release\x86\pcre2-8.dll" -Force
-              Write-Host "OK: 32-bit pcre2-8.dll zkopírována z $($dll.FullName)"
-            }
+          $pcre32 = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
+          if ($pcre32) {
+            Copy-Item $pcre32.FullName "release\x86\pcre2-8.dll" -Force
+            Write-Host "OK: 32-bit pcre2-8.dll zkopírována z $($pcre32.FullName)"
           }
 
           # 3. Kontrola architektury všech DLL v release\amd64 a release\x86 před zabalením MSI
           Get-ChildItem "release\amd64\*.dll" | ForEach-Object {
             $b = [System.IO.File]::ReadAllBytes($_.FullName)
             $m = [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4)
+            Write-Host "amd64\$($_.Name) -> 0x$($m.ToString('X'))"
             if ($m -ne 0x8664) { throw "CHYBA: $($_.Name) v release\amd64 není 64-bit!" }
           }
           Get-ChildItem "release\x86\*.dll" | ForEach-Object {
             $b = [System.IO.File]::ReadAllBytes($_.FullName)
             $m = [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4)
+            Write-Host "x86\$($_.Name) -> 0x$($m.ToString('X'))"
             if ($m -ne 0x014c) { throw "CHYBA: $($_.Name) v release\x86 není 32-bit!" }
           }
-          Write-Host "OVĚŘENO: Všechny DLL v amd64 jsou 64-bit a všechny DLL v x86 jsou 32-bit."
+          Write-Host "OVĚŘENO: Všechny DLL v amd64 jsou 64-bit (0x8664) a všechny DLL v x86 jsou 32-bit (0x14C)."
 
           # 4. Vygenerování ModSec64.wxs (64-bit) a ModSec32.wxs (32-bit) pomocí WiX heat.exe
           heat.exe dir "release\amd64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
