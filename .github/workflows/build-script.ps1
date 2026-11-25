@@ -62,19 +62,19 @@ $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_
 $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
 Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-Get-ChildItem "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
-  $c = Get-Content $_.FullName -Raw
-  if ($c -match "Command failed to execute|Failed to open the audit log file") {
-    Write-Host "PATCHING AUDIT LOG IN: $($_.FullName)"
-    # Zrušíme jakoukoli větev if (...) vedoucí k "Command failed to execute" nebo "Failed to open the audit log file"
-    $c = [regex]::Replace($c, 'if\s*\([^{;]+\)\s*\{\s*return\s+"Command failed to execute[^}]+\}', 'if (0) { /* bypassed */ }')
-    $c = [regex]::Replace($c, 'if\s*\([^{;]+\)\s*\{\s*return\s+apr_psprintf\s*\([^}]+Failed to open the audit log file[^}]+\}', 'if (0) { /* bypassed */ }')
-    # Pojistka: nahradíme i samotný return řádek, pokud nebyl v složených závorkách
-    $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed */')
-    $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed */')
-    Set-Content $_.FullName $c -NoNewline
-  }
+# Přímá úprava cmd_audit_log a cmd_audit_log2 v apache2\apache2_config.c
+$cfg = Get-Content "apache2\apache2_config.c" -Raw
+$cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 dcfg->auditlog_name = (char *)p1; return NULL;"
+$cfg = $cfg -replace '(cmd_audit_log2\s*\([^)]*\)\s*\{)', "`$1 dcfg->auditlog2_name = (char *)p1; return NULL;"
+$cfg = $cfg -replace 'Command failed to execute', 'OK_IIS_AUDIT'
+Set-Content "apache2\apache2_config.c" $cfg -NoNewline
+
+# Ověření před kompilací, že starý řetězec v kódu už opravdu není
+if (Select-String -Path "apache2\apache2_config.c" -Pattern "Command failed to execute" -Quiet) {
+  throw "CHYBA PATCHE: V apache2_config.c stále zůstal text Command failed to execute!"
 }
+Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven pro přímý zápis audit logu."
+
 
 
 
