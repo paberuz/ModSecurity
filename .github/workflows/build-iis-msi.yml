@@ -198,6 +198,34 @@ jobs:
           Set-Content -Path "apache2\apache2_io.c" -Value ($ioContent + $stub) -NoNewline
           Write-Host "Funkce ap_map_http_request_error bezpečně přesměrována v apache2\apache2_io.c"
 
+          # 5. Nativní Windows zápis pro SecAuditLog (obejití Command failed to execute na IIS)
+          # 5a) V apache2_config.c zrušíme blokování při selhání APR/piped loggeru a cestu normálně přijmeme
+          $cfgFile = "apache2\apache2_config.c"
+          $cfgText = Get-Content $cfgFile -Raw
+          $cfgText = [regex]::Replace(
+            $cfgText,
+            'return\s+apr_psprintf\s*\(\s*cmd->pool\s*,\s*"ModSecurity:\s*Failed to open the audit log file:[^;]+;',
+            '/* IIS native audit log bypass */'
+          )
+          $cfgText = [regex]::Replace(
+            $cfgText,
+            'return\s+"Command failed to execute \(check file/folder permissions, syntax, etc\.\)\.";',
+            '/* IIS native piped logger bypass */'
+          )
+          Set-Content -Path $cfgFile -Value $cfgText -NoNewline
+          Write-Host "Patched apache2_config.c pro IIS SecAuditLog"
+
+          # 5b) V msc_logging.c přidáme přímý zápis do dcfg->auditlog_name přes Windows _fsopen(_SH_DENYNO)
+          $logFile = "apache2\msc_logging.c"
+          $logText = Get-Content $logFile -Raw
+          $winAuditHelper = "`r`n#include <share.h>`r`nstatic void iis_direct_audit_write(const char *path, const char *data, size_t len) { if (!path || !data || len == 0) return; const char *p = (path[0] == '|') ? path + 1 : path; FILE *fp = _fsopen(p, `"ab`", _SH_DENYNO); if (fp) { fwrite(data, 1, len, fp); fflush(fp); fclose(fp); } }`r`n"
+          $logText = $winAuditHelper + $logText
+
+          # Vložíme volání iis_direct_audit_write hned za každé volání apr_file_write / sec_auditlog_write v sec_audit_logger
+          $logText = $logText -replace '(apr_file_write_full\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, `$2, `$3);"
+          $logText = $logText -replace '(apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*&([^)]+)\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, `$2, `$3);"
+          Set-Content -Path $logFile -Value $logText -NoNewline
+          Write-Host "Patched msc_logging.c pro přímý Windows zápis do modsec_audit.log"
 
 
       - name: Build dependencies and ModSecurity (with matching VS2022 APR)
