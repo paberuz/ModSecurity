@@ -66,12 +66,16 @@ Get-ChildItem "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
   $c = Get-Content $_.FullName -Raw
   if ($c -match "Command failed to execute|Failed to open the audit log file") {
     Write-Host "PATCHING AUDIT LOG IN: $($_.FullName)"
-    $c = $c -replace '(msc_piped_logger\s*\([^)]*\)\s*\{)', "`$1 return NULL;"
-    $c = $c -replace '"Command failed to execute', '"OK_IIS_AUDIT'
-    $c = $c -replace 'return\s+apr_psprintf\s*\(\s*cmd->pool\s*,\s*"ModSecurity:\s*Failed to open the audit log file:[^;]+;', '/* bypassed */'
+    # Zrušíme jakoukoli větev if (...) vedoucí k "Command failed to execute" nebo "Failed to open the audit log file"
+    $c = [regex]::Replace($c, 'if\s*\([^{;]+\)\s*\{\s*return\s+"Command failed to execute[^}]+\}', 'if (0) { /* bypassed */ }')
+    $c = [regex]::Replace($c, 'if\s*\([^{;]+\)\s*\{\s*return\s+apr_psprintf\s*\([^}]+Failed to open the audit log file[^}]+\}', 'if (0) { /* bypassed */ }')
+    # Pojistka: nahradíme i samotný return řádek, pokud nebyl v složených závorkách
+    $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed */')
+    $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed */')
     Set-Content $_.FullName $c -NoNewline
   }
 }
+
 
 
 $lt = Get-Content "apache2\msc_logging.c" -Raw
