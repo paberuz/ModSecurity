@@ -75,13 +75,13 @@ if (Select-String -Path "apache2\apache2_config.c" -Pattern "Command failed to e
 }
 Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven pro přímý zápis audit logu."
 
+# Přímý zápis do modsec_audit.log hned vedle volání ReportEvent ve složce iis/
+$apiFileObj = Get-ChildItem -Path "iis" -Filter "*.cpp" | Where-Object { Select-String -Path $_.FullName -Pattern "ReportEvent" -Quiet } | Select-Object -First 1
+if (-not $apiFileObj) { throw "Nenalezen žádný .cpp soubor s ReportEvent ve složce iis/" }
+$apiFile = $apiFileObj.FullName
+Write-Host "Nalezen soubor s ReportEvent: $apiFile"
 
-
-
-# Přímý zápis do modsec_audit.log v iis\api.c hned vedle zápisu do Windows Event Vieweru (ReportEvent)
-$apiFile = "iis\api.c"
 $api = Get-Content $apiFile -Raw
-
 $helper = @"
 #include <stdio.h>
 #include <share.h>
@@ -99,17 +99,19 @@ static void iis_write_audit_file(const char *msg) {
 "@
 
 $api = $helper + "`r`n" + $api
-# Vložíme volání iis_write_audit_file těsně před každé volání ReportEventA / ReportEvent v iis\api.c
 $api = [regex]::Replace($api, '(ReportEventA?\s*\()', "iis_write_audit_file(errstr); `$1")
 Set-Content -Path $apiFile -Value $api -NoNewline
 
-# Ověření před kompilací, že se volání v iis\api.c skutečně nachází
 $match = Select-String -Path $apiFile -Pattern "iis_write_audit_file\(errstr\)"
 if (-not $match) {
   $reLine = Select-String -Path $apiFile -Pattern "ReportEvent"
-  throw "Proměnná errstr nenalezena. Řádek s ReportEvent v iis\api.c je: $($reLine.Line)"
+  throw "Proměnná errstr nenalezena. Řádek s ReportEvent je: $($reLine.Line)"
 }
 Write-Host "OVĚŘENO: Zápis do modsec_audit.log vložen před: $($match.Line.Trim())"
 Write-Host "HOTOVO"
+
+
+
+
 
 
