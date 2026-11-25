@@ -75,41 +75,37 @@ if (Select-String -Path "apache2\apache2_config.c" -Pattern "Command failed to e
 }
 Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven pro přímý zápis audit logu."
 
-# Přímý zápis do modsec_audit.log hned vedle volání ReportEvent ve složce iis/
+
+
+# Přímý zápis do modsec_audit.log přes nativní Windows API (CreateFileA/WriteFile) bez zásahu do hlaviček
 $apiFileObj = Get-ChildItem -Path "iis" -Filter "*.cpp" | Where-Object { Select-String -Path $_.FullName -Pattern "ReportEvent" -Quiet } | Select-Object -First 1
 if (-not $apiFileObj) { throw "Nenalezen žádný .cpp soubor s ReportEvent ve složce iis/" }
 $apiFile = $apiFileObj.FullName
 Write-Host "Nalezen soubor s ReportEvent: $apiFile"
 
 $api = Get-Content $apiFile -Raw
-$helper = @"
-#include <stdio.h>
-#include <share.h>
-static void iis_write_audit_file(const char *msg) {
-    FILE *f;
-    if (!msg || !*msg) return;
-    f = _fsopen("C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log", "ab", _SH_DENYNO);
-    if (f) {
-        fwrite(msg, 1, strlen(msg), f);
-        fwrite("\r\n", 1, 2, f);
-        fflush(f);
-        fclose(f);
+$winWriteBlock = @"
+if (errstr && *errstr) {
+    HANDLE hLog = CreateFileA("C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log", FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (hLog != INVALID_HANDLE_VALUE) {
+        DWORD dwWritten = 0;
+        WriteFile(hLog, errstr, (DWORD)strlen(errstr), &dwWritten, NULL);
+        WriteFile(hLog, "\r\n", 2, &dwWritten, NULL);
+        CloseHandle(hLog);
     }
 }
 "@
 
-$api = $helper + "`r`n" + $api
-$api = [regex]::Replace($api, '(ReportEventA?\s*\()', "iis_write_audit_file(errstr); `$1")
+# Vložíme zápis do souboru těsně před řádek s ReportEvent
+$api = [regex]::Replace($api, '(?m)^([ \t]*)(ReportEventA?\s*\()', "`$1$winWriteBlock`r`n`$1`$2")
 Set-Content -Path $apiFile -Value $api -NoNewline
 
-$match = Select-String -Path $apiFile -Pattern "iis_write_audit_file\(errstr\)"
-if (-not $match) {
-  $reLine = Select-String -Path $apiFile -Pattern "ReportEvent"
-  throw "Proměnná errstr nenalezena. Řádek s ReportEvent je: $($reLine.Line)"
+# Ověření před kompilací
+if (-not (Select-String -Path $apiFile -Pattern "FILE_APPEND_DATA" -Quiet)) {
+  throw "CHYBA: Blok CreateFileA se nevložil před ReportEvent!"
 }
-Write-Host "OVĚŘENO: Zápis do modsec_audit.log vložen před: $($match.Line.Trim())"
+Write-Host "OVĚŘENO: Nativní Windows zápis vložen do $apiFile"
 Write-Host "HOTOVO"
-
 
 
 
