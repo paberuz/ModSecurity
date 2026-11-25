@@ -65,11 +65,14 @@ Set-Content "apache2\apache2_io.c" $io -NoNewline
 Get-ChildItem "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
   $c = Get-Content $_.FullName -Raw
   if ($c -match "Command failed to execute|Failed to open the audit log file") {
-    $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed */')
-    $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed */')
+    Write-Host "PATCHING AUDIT LOG IN: $($_.FullName)"
+    $c = $c -replace '(msc_piped_logger\s*\([^)]*\)\s*\{)', "`$1 return NULL;"
+    $c = $c -replace '"Command failed to execute', '"OK_IIS_AUDIT'
+    $c = $c -replace 'return\s+apr_psprintf\s*\(\s*cmd->pool\s*,\s*"ModSecurity:\s*Failed to open the audit log file:[^;]+;', '/* bypassed */'
     Set-Content $_.FullName $c -NoNewline
   }
 }
+
 
 $lt = Get-Content "apache2\msc_logging.c" -Raw
 $helper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_wlog(const char *p, const char *d, size_t l) { FILE *f; if(!p||!d||!l)return; if(p=='|')p++; f=_fsopen(p,`"ab`",_SH_DENYNO); if(f){fwrite(d,1,l,f);fflush(f);fclose(f);} }`r`n"
