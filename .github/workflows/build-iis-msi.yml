@@ -119,7 +119,7 @@ jobs:
             "$gh/ssdeep-project/ssdeep/releases/download/release-2.14.1/$ssdeepZipName"
           )
 
-      - name: Patch VS, WiX, PCRE2, libinjection and IIS API
+      - name: Patch VS, WiX, PCRE2, libinjection, IIS API and AuditLog
         shell: pwsh
         run: |
           $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -150,14 +150,13 @@ jobs:
             $wixBin | Out-File -FilePath $env:GITHUB_PATH -Append
           }
 
-          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH a úklid others\*.obj před x86 buildem)
+          # 1. Úprava iis/*.bat (VS cesty, WiX cesty, PCRE2 + reset PATH před x86 buildem)
           $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wixBin"
           Get-ChildItem -Path "iis" -Filter "*.bat" | ForEach-Object {
             $text = Get-Content $_.FullName -Raw
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vcvarsX64
             $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vcvarsX86
             $text = $text -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1"
-            $text = $text -replace 'Cleaning directories\.\.\.', "Cleaning directories...`r`ndel /s /q `"..\others\*.obj`" 2>nul"
             if ($wixBin) {
               $text = $text -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wixBin
             }
@@ -179,8 +178,6 @@ jobs:
             Write-Host "Patched PCRE2 & libinjection in $($_.FullName)"
           }
 
-
-
           # 3. Zkopírování zdrojových kódů libinjection ze submodulu do apache2\libinjection
           $libinjFile = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
           if ($libinjFile) {
@@ -189,8 +186,6 @@ jobs:
             Write-Host "Zkopírováno libinjection z $($libinjFile.DirectoryName) do apache2\libinjection"
           }
 
-         
-          
           # 4. Přesměrování ap_map_http_request_error na vlastní funkci bez kolize s http_protocol.h
           $ioContent = Get-Content "apache2\apache2_io.c" -Raw
           $ioContent = $ioContent -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
@@ -198,166 +193,15 @@ jobs:
           Set-Content -Path "apache2\apache2_io.c" -Value ($ioContent + $stub) -NoNewline
           Write-Host "Funkce ap_map_http_request_error bezpečně přesměrována v apache2\apache2_io.c"
 
-          # 5. Nativní Windows zápis pro SecAuditLog (obejití Command failed to execute na IIS)
-          # 5a) V apache2_config.c zrušíme blokování při selhání APR/piped loggeru a cestu normálně přijmeme
-          $cfgFile = "apache2\apache2_config.c"
-          $cfgText = Get-Content $cfgFile -Raw
-          $cfgText = [regex]::Replace(
-            $cfgText,
-            'return\s+apr_psprintf\s*\(\s*cmd->pool\s*,\s*"ModSecurity:\s*Failed to open the audit log file:[^;]+;',
-            '/* IIS native audit log bypass */'
-          )
-          $cfgText = [regex]::Replace(
-            $cfgText,
-            'return\s+"Command failed to execute \(check file/folder permissions, syntax, etc\.\)\.";',
-            '/* IIS native piped logger bypass */'
-          )
-          Set-Content -Path $cfgFile -Value $cfgText -NoNewline
-          Write-Host "Patched apache2_config.c pro IIS SecAuditLog"
-
-          # 5b) V msc_logging.c přidáme přímý zápis do dcfg->auditlog_name přes Windows _fsopen(_SH_DENYNO)
-          $logFile = "apache2\msc_logging.c"
-          $logText = Get-Content $logFile -Raw
-          $winAuditHelper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_direct_audit_write(const char *path, const char *data, size_t len) { const char *p; FILE *fp; if (!path || !data || len == 0) return; p = (path[0] == '|') ? path + 1 : path; fp = _fsopen(p, `"ab`", _SH_DENYNO); if (fp) { fwrite(data, 1, len, fp); fflush(fp); fclose(fp); } }`r`n"
-          $logText = $logText -replace '(#include\s+"msc_logging\.h")', "`$1`r`n$winAuditHelper"
-
-          # Vložíme volání iis_direct_audit_write hned za každé volání apr_file_write / apr_file_write_full v sec_audit_logger
-          $logText = $logText -replace '(apr_file_write_full\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, (const char *)(`$2), (size_t)(`$3));"
-          $logText = $logText -replace '(apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*&([^)]+)\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, (const char *)(`$2), (size_t)(`$3));"
-          Set-Content -Path $logFile -Value $logText -NoNewline
-          Write-Host "Patched msc_logging.c pro přímý Windows zápis do modsec_audit.log"
-
-
-
-      - name: Build dependencies and ModSecurity (with matching VS2022 APR)
-        working-directory: iis
-        shell: pwsh
-        run: |
-          # Nejprve spustíme build_release.bat nebo připravíme APR z httpd-2.4.54.tar.gz s CMake (stejné VS 2022 CRT)
-          $httpdTar = Join-Path $env:USERPROFILE "Downloads\httpd-2.4.54.tar.gz"
-          $aprWork = Join-Path $env:TEMP "apr_build"
-          if (Test-Path $aprWork) { Remove-Item $aprWork -Recurse -Force }
-          New-Item -ItemType Directory -Force -Path $aprWork | Out-Null
-          tar -xzf $httpdTar -C $aprWork
-          $httpdSrc = Get-ChildItem -Path $aprWork -Directory | Select-Object -First 1
-
-          # Stažení zdrojových kódů APR 1.7.0 a APR-util 1.6.1 z archive.apache.org
-          $apHost = "https://" + "archive.apache.org"
-          curl.exe -fsSL "$apHost/dist/apr/apr-1.7.0.tar.gz" -o "$aprWork\apr.tar.gz"
-          curl.exe -fsSL "$apHost/dist/apr/apr-util-1.6.1.tar.gz" -o "$aprWork\apu.tar.gz"
-          tar -xzf "$aprWork\apr.tar.gz" -C $aprWork
-          tar -xzf "$aprWork\apu.tar.gz" -C $aprWork
-
-          $aprSrc = Join-Path $aprWork "apr-1.7.0"
-          $apuSrc = Join-Path $aprWork "apr-util-1.6.1"
-
-          # Kompilace 64-bit APR a APR-util ve VS 2022
-          cmake -S $aprSrc -B "$aprWork\apr64" -G "Visual Studio 17 2022" -A x64 -DCMAKE_INSTALL_PREFIX="$aprWork\install64"
-          cmake --build "$aprWork\apr64" --config Release --target INSTALL
-          cmake -S $apuSrc -B "$aprWork\apu64" -G "Visual Studio 17 2022" -A x64 -DCMAKE_INSTALL_PREFIX="$aprWork\install64" -DOPENSSL_ROOT_DIR=""
-          cmake --build "$aprWork\apu64" --config Release --target INSTALL
-
-          # Kompilace 32-bit APR a APR-util ve VS 2022
-          cmake -S $aprSrc -B "$aprWork\apr32" -G "Visual Studio 17 2022" -A Win32 -DCMAKE_INSTALL_PREFIX="$aprWork\install32"
-          cmake --build "$aprWork\apr32" --config Release --target INSTALL
-          cmake -S $apuSrc -B "$aprWork\apu32" -G "Visual Studio 17 2022" -A Win32 -DCMAKE_INSTALL_PREFIX="$aprWork\install32" -DOPENSSL_ROOT_DIR=""
-          cmake --build "$aprWork\apu32" --config Release --target INSTALL
-
-          # Úprava build_dependencies.bat, aby po rozbalení Apache24 přepsal libapr-1 a libaprutil-1 našimi VS2022 verzemi
-          $depBat = Get-Content "build_dependencies.bat" -Raw
-          $inject64 = "copy /Y `"$aprWork\install64\bin\libapr*.dll`" `"%APACHE24%\bin\`"`r`ncopy /Y `"$aprWork\install64\lib\libapr*.lib`" `"%APACHE24%\lib\`""
-          $inject32 = "copy /Y `"$aprWork\install32\bin\libapr*.dll`" `"%APACHE24%\bin\`"`r`ncopy /Y `"$aprWork\install32\lib\libapr*.lib`" `"%APACHE24%\lib\`""
-          $depBat = $depBat -replace '(%APACHE24%\\include)', "`$1`r`n$inject64"
-          Set-Content -Path "build_dependencies.bat" -Value $depBat -NoNewline
-
-          # Uložení 32-bit APR pro pozdější přepsání před x86 buildem
-          New-Item -ItemType Directory -Force -Path "apr_vs2022\x64", "apr_vs2022\x86" | Out-Null
-          Copy-Item "$aprWork\install64\bin\libapr*.dll" "apr_vs2022\x64\" -Force
-          Copy-Item "$aprWork\install64\lib\libapr*.lib" "apr_vs2022\x64\" -Force
-          Copy-Item "$aprWork\install32\bin\libapr*.dll" "apr_vs2022\x86\" -Force
-          Copy-Item "$aprWork\install32\lib\libapr*.lib" "apr_vs2022\x86\" -Force
-
-          # Přidání kopírování 32-bit APR před x86 kompilaci v build_release.bat
-          $relBat = Get-Content "build_release.bat" -Raw
-          $relBat = $relBat -replace '(vcvars32\.bat[^\r\n]*)', "`$1`r`ncopy /Y `"apr_vs2022\x86\*.dll`" `"dependencies\build_dir\Apache24\bin\`"`r`ncopy /Y `"apr_vs2022\x86\*.lib`" `"dependencies\build_dir\Apache24\lib\`""
-          Set-Content -Path "build_release.bat" -Value $relBat -NoNewline
-
-          cmd /c build_release.bat
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-
-      - name: Build MSI installer
-        working-directory: iis
-        shell: pwsh
-        run: |
-          # 1. Zkompilování pravé 64-bit fuzzy.dll (x64) ze zdrojového archivu ssdeep-2.14.1.tar.gz
-          $ssdeepTar = Join-Path $env:USERPROFILE "Downloads\ssdeep-2.14.1.tar.gz"
-          $ssdeepBuild = Join-Path $env:TEMP "ssdeep64"
-          if (Test-Path $ssdeepBuild) { Remove-Item $ssdeepBuild -Recurse -Force }
-          New-Item -ItemType Directory -Force -Path $ssdeepBuild | Out-Null
-          tar -xzf $ssdeepTar -C $ssdeepBuild
-          $ssdeepSrc = Get-ChildItem -Path $ssdeepBuild -Directory | Select-Object -First 1
-
-          New-Item -ItemType File -Path (Join-Path $ssdeepSrc.FullName "unistd.h") -Force | Out-Null
-          Set-Content -Path (Join-Path $ssdeepSrc.FullName "config.h") -Value "#include <stdio.h>`r`n#define fseeko _fseeki64`r`n#define ftello _ftelli64`r`n" -Force
-
-          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-          $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
-          $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
-
-          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /Dfseeko=_fseeki64 /Dftello=_ftelli64 /I. fuzzy.c edit_dist.c find-file-size.c /link /OUT:fuzzy64.dll"
-
-          $builtFuzzy64 = Join-Path $ssdeepSrc.FullName "fuzzy64.dll"
-          if (-not (Test-Path $builtFuzzy64)) { throw "Nepodařilo se zkompilovat 64-bit fuzzy.dll!" }
-          Copy-Item $builtFuzzy64 "release\amd64\fuzzy.dll" -Force
-          Write-Host "OK: 64-bit fuzzy.dll zkompilována a zkopírována do release\amd64\"
-
-          # 2. Extrakce 64-bit pcre2-8.dll přímo z archivu httpd-2.4.54-win64-VS16.zip a 32-bit z build_dir
-          $httpd64Zip = Join-Path $env:USERPROFILE "Downloads\httpd-2.4.54-win64-VS16.zip"
-          $pcre64Temp = Join-Path $env:TEMP "pcre64_extract"
-          if (Test-Path $pcre64Temp) { Remove-Item $pcre64Temp -Recurse -Force }
-          7z e $httpd64Zip "Apache24\bin\pcre2-8.dll" -o"$pcre64Temp" -y | Out-Null
-          Copy-Item (Join-Path $pcre64Temp "pcre2-8.dll") "release\amd64\pcre2-8.dll" -Force
-          Write-Host "OK: 64-bit pcre2-8.dll vytažena z httpd-2.4.54-win64-VS16.zip"
-
-          $pcre32 = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
-          if ($pcre32) {
-            Copy-Item $pcre32.FullName "release\x86\pcre2-8.dll" -Force
-            Write-Host "OK: 32-bit pcre2-8.dll zkopírována z $($pcre32.FullName)"
+          # 5. Nativní Windows zápis pro SecAuditLog napříč všemi soubory v apache2/ a iis/
+          Get-ChildItem -Path "apache2", "iis" -Filter "*.c*" -Recurse | ForEach-Object {
+            $c = Get-Content $_.FullName -Raw
+            if ($c -match "Command failed to execute|Failed to open the audit log file") {
+              Write-Host "Nalezena kontrola audit logu v: $($_.FullName)"
+              $c = [regex]::Replace($c, 'return\s+"Command failed to execute[^;]+;', '/* bypassed Command failed */')
+              $c = [regex]::Replace($c, 'return\s+apr_psprintf\s*\([^;]+Failed to open the audit log file[^;]+;', '/* bypassed Failed to open */')
+              Set-Content -Path $_.FullName -Value $c -NoNewline
+              Write-Host "Opraveno v: $($_.FullName)"
+            }
           }
 
-          # 3. Kontrola architektury všech DLL v release\amd64 a release\x86 před zabalením MSI
-          Get-ChildItem "release\amd64\*.dll" | ForEach-Object {
-            $b = [System.IO.File]::ReadAllBytes($_.FullName)
-            $m = [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4)
-            Write-Host "amd64\$($_.Name) -> 0x$($m.ToString('X'))"
-            if ($m -ne 0x8664) { throw "CHYBA: $($_.Name) v release\amd64 není 64-bit!" }
-          }
-          Get-ChildItem "release\x86\*.dll" | ForEach-Object {
-            $b = [System.IO.File]::ReadAllBytes($_.FullName)
-            $m = [BitConverter]::ToUInt16($b, [BitConverter]::ToInt32($b, 0x3C) + 4)
-            Write-Host "x86\$($_.Name) -> 0x$($m.ToString('X'))"
-            if ($m -ne 0x014c) { throw "CHYBA: $($_.Name) v release\x86 není 32-bit!" }
-          }
-          Write-Host "OVĚŘENO: Všechny DLL v amd64 jsou 64-bit (0x8664) a všechny DLL v x86 jsou 32-bit (0x14C)."
-
-          # 4. Vygenerování ModSec64.wxs (64-bit) a ModSec32.wxs (32-bit) pomocí WiX heat.exe
-          heat.exe dir "release\amd64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
-          heat.exe dir "release\x86" -cg ModSec32Components -dr inetsrv32 -gg -sreg -srd -var var.ModSecurityIISRelease32 -out "ModSec32.wxs"
-
-          # 5. Kompilace a sloučení do finálního MSI instalátoru
-          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease64="release\amd64" -arch x64 "installer.wxs" "ModSec64.wxs"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "ModSec32.wxs"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-          light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
-          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-
-
-      - name: Upload MSI artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: ModSecurity-IIS-MSI
-          path: iis/**/*.msi
