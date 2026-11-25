@@ -209,24 +209,21 @@ jobs:
         working-directory: iis
         shell: pwsh
         run: |
-          # 0. Doplnění pcre2-8.dll do release\amd64 a release\x86 (pokud tam chybí)
-          $pcreDlls = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse
-          foreach ($dll in $pcreDlls) {
-            if ($dll.FullName -match "x86|Win32|32") {
-              Copy-Item $dll.FullName "release\x86\" -Force
-            } else {
-              Copy-Item $dll.FullName "release\amd64\" -Force
+          # 0. Doplnění správné 64-bit a 32-bit pcre2-8.dll do release\amd64 a release\x86
+          $pcreAll = Get-ChildItem -Path "dependencies" -Filter "pcre2-8.dll" -Recurse
+          foreach ($dll in $pcreAll) {
+            $bytes = [System.IO.File]::ReadAllBytes($dll.FullName)
+            $peOffset = [BitConverter]::ToInt32($bytes, 0x3C)
+            $machine = [BitConverter]::ToUInt16($bytes, $peOffset + 4)
+            if ($machine -eq 0x8664) {
+              Copy-Item $dll.FullName "release\amd64\pcre2-8.dll" -Force
+              Write-Host "Zkopírována 64-bit pcre2-8.dll z $($dll.FullName)"
+            } elseif ($machine -eq 0x014c) {
+              Copy-Item $dll.FullName "release\x86\pcre2-8.dll" -Force
+              Write-Host "Zkopírována 32-bit pcre2-8.dll z $($dll.FullName)"
             }
           }
-          # Pokud byla jen jedna pcre2-8.dll, ověříme obě složky
-          if (-not (Test-Path "release\amd64\pcre2-8.dll")) {
-            $d64 = Get-ChildItem -Path "dependencies\build_dir\pcre" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
-            if ($d64) { Copy-Item $d64.FullName "release\amd64\" -Force }
-          }
-          if (-not (Test-Path "release\x86\pcre2-8.dll")) {
-            $d32 = Get-ChildItem -Path "dependencies\build_dir\Apache24\bin" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
-            if ($d32) { Copy-Item $d32.FullName "release\x86\" -Force }
-          }
+
 
           # 1. Vygenerování ModSec64.wxs (64-bit) a ModSec32.wxs (32-bit) pomocí WiX heat.exe
           heat.exe dir "release\amd64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
