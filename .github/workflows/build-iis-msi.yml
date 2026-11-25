@@ -218,14 +218,15 @@ jobs:
           # 5b) V msc_logging.c přidáme přímý zápis do dcfg->auditlog_name přes Windows _fsopen(_SH_DENYNO)
           $logFile = "apache2\msc_logging.c"
           $logText = Get-Content $logFile -Raw
-          $winAuditHelper = "`r`n#include <share.h>`r`nstatic void iis_direct_audit_write(const char *path, const char *data, size_t len) { if (!path || !data || len == 0) return; const char *p = (path[0] == '|') ? path + 1 : path; FILE *fp = _fsopen(p, `"ab`", _SH_DENYNO); if (fp) { fwrite(data, 1, len, fp); fflush(fp); fclose(fp); } }`r`n"
-          $logText = $winAuditHelper + $logText
+          $winAuditHelper = "`r`n#include <stdio.h>`r`n#include <share.h>`r`nstatic void iis_direct_audit_write(const char *path, const char *data, size_t len) { const char *p; FILE *fp; if (!path || !data || len == 0) return; p = (path[0] == '|') ? path + 1 : path; fp = _fsopen(p, `"ab`", _SH_DENYNO); if (fp) { fwrite(data, 1, len, fp); fflush(fp); fclose(fp); } }`r`n"
+          $logText = $logText -replace '(#include\s+"msc_logging\.h")', "`$1`r`n$winAuditHelper"
 
-          # Vložíme volání iis_direct_audit_write hned za každé volání apr_file_write / sec_auditlog_write v sec_audit_logger
-          $logText = $logText -replace '(apr_file_write_full\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, `$2, `$3);"
-          $logText = $logText -replace '(apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*&([^)]+)\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, `$2, `$3);"
+          # Vložíme volání iis_direct_audit_write hned za každé volání apr_file_write / apr_file_write_full v sec_audit_logger
+          $logText = $logText -replace '(apr_file_write_full\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*([^,]+)\s*,\s*[^)]+\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, (const char *)(`$2), (size_t)(`$3));"
+          $logText = $logText -replace '(apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,\s*([^,]+)\s*,\s*&([^)]+)\)\s*;)', "`$1`r`n    iis_direct_audit_write(msr->txcfg->auditlog_name, (const char *)(`$2), (size_t)(`$3));"
           Set-Content -Path $logFile -Value $logText -NoNewline
           Write-Host "Patched msc_logging.c pro přímý Windows zápis do modsec_audit.log"
+
 
 
       - name: Build dependencies and ModSecurity (with matching VS2022 APR)
