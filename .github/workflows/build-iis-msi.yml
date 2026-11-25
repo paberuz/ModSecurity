@@ -224,7 +224,8 @@ jobs:
           $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
           $vcvarsX64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
 
-          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /I. fuzzy.c edit_dist.c find-file-size.c /link /OUT:fuzzy64.dll"
+          cmd /c "`"$vcvarsX64`" && cd /d `"$($ssdeepSrc.FullName)`" && cl /O2 /LD /D_WIN32 /DFUZZY_EXPORTS /Dfseeko=_fseeki64 /Dftello=_ftelli64 /I. fuzzy.c edit_dist.c find-file-size.c /link /OUT:fuzzy64.dll"
+
           $builtFuzzy64 = Join-Path $ssdeepSrc.FullName "fuzzy64.dll"
           if (-not (Test-Path $builtFuzzy64)) { throw "Nepodařilo se zkompilovat 64-bit fuzzy.dll!" }
           Copy-Item $builtFuzzy64 "release\amd64\fuzzy.dll" -Force
