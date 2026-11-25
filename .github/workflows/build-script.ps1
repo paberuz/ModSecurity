@@ -64,8 +64,8 @@ Set-Content "apache2\apache2_io.c" $io -NoNewline
 
 # Přímá úprava cmd_audit_log a cmd_audit_log2 v apache2\apache2_config.c
 $cfg = Get-Content "apache2\apache2_config.c" -Raw
-$cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 dcfg->auditlog_name = (char *)p1; return NULL;"
-$cfg = $cfg -replace '(cmd_audit_log2\s*\([^)]*\)\s*\{)', "`$1 dcfg->auditlog2_name = (char *)p1; return NULL;"
+$cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog_name = (char *)p1; return NULL;"
+$cfg = $cfg -replace '(cmd_audit_log2\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog2_name = (char *)p1; return NULL;"
 $cfg = $cfg -replace 'Command failed to execute', 'OK_IIS_AUDIT'
 Set-Content "apache2\apache2_config.c" $cfg -NoNewline
 
