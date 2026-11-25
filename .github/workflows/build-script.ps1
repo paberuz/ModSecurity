@@ -84,31 +84,36 @@ $apiFile = $apiFileObj.FullName
 Write-Host "Nalezen soubor s ReportEvent: $apiFile"
 
 $api = Get-Content $apiFile -Raw
+
+# Vyhledáme řádek s ReportEvent a vytáhneme z něj přesný název 8. parametru (pole textů události lpStrings)
+$reMatch = [regex]::Match($api, 'ReportEventA?\s*\(([^;]+)\)')
+if (-not $reMatch.Success) { throw "Nenalezeno volání ReportEvent v $apiFile" }
+$argsList = $reMatch.Groups[1].Value -split ','
+$lpStringsVar = $argsList[7].Trim()
+$wNumStringsVar = $argsList[5].Trim()
+Write-Host "Zjištěné parametry ReportEvent: počet=$wNumStringsVar, pole=$lpStringsVar"
+
 $winWriteBlock = @"
-if (errstr && *errstr) {
+if ($lpStringsVar) {
     HANDLE hLog = CreateFileA("C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log", FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
     if (hLog != INVALID_HANDLE_VALUE) {
         DWORD dwWritten = 0;
-        WriteFile(hLog, errstr, (DWORD)strlen(errstr), &dwWritten, NULL);
-        WriteFile(hLog, "\r\n", 2, &dwWritten, NULL);
+        for (WORD i = 0; i < (WORD)($wNumStringsVar); i++) {
+            if (($lpStringsVar)[i]) {
+                WriteFile(hLog, ($lpStringsVar)[i], (DWORD)strlen(($lpStringsVar)[i]), &dwWritten, NULL);
+                WriteFile(hLog, "\r\n", 2, &dwWritten, NULL);
+            }
+        }
         CloseHandle(hLog);
     }
 }
 "@
 
-# Vložíme zápis do souboru těsně před celý řádek obsahující ReportEvent
 $api = [regex]::Replace($api, '(?m)^(.*ReportEventA?\s*\(.*)$', "$winWriteBlock`r`n`$1")
-
 Set-Content -Path $apiFile -Value $api -NoNewline
 
-# Ověření před kompilací
 if (-not (Select-String -Path $apiFile -Pattern "FILE_APPEND_DATA" -Quiet)) {
   throw "CHYBA: Blok CreateFileA se nevložil před ReportEvent!"
 }
 Write-Host "OVĚŘENO: Nativní Windows zápis vložen do $apiFile"
 Write-Host "HOTOVO"
-
-
-
-
-
