@@ -64,7 +64,7 @@ $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_
 $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
 Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-# Oprava SecAuditLog pro IIS: otevření souboru přes standardní APR místo chyby "Command failed to execute"
+# Oprava SecAuditLog pro IIS: otevření souboru přes standardní APR hned na začátku cmd_audit_log
 $cfgFile = "apache2\apache2_config.c"
 $cfg = Get-Content $cfgFile -Raw
 
@@ -79,20 +79,17 @@ $aprOpenCode = @'
     return NULL;
 '@
 
-# Nahradíme tělo funkce cmd_audit_log (od první složené závorky až po return s chybou)
-$cfg = [regex]::Replace(
+# Najde hlavičku definice funkce cmd_audit_log (končící složenou závorkou {) a vloží náš kód hned na její začátek
+$cfgNew = [regex]::Replace(
     $cfg,
-    '(static\s+const\s+char\s*\*\s*cmd_audit_log\s*\([^)]*\)\s*\{)[\s\S]*?Command failed to execute[^;]*;',
+    '(?m)^([^{;]*\bcmd_audit_log\s*\([^)]*\)\s*\{)',
     "`$1`r`n$aprOpenCode`r`n"
 )
 
-Set-Content -Path $cfgFile -Value $cfg -NoNewline
-
-# Ověření před kompilací
-if (-not (Select-String -Path $cfgFile -Pattern "Failed to open audit log file" -Quiet)) {
-    throw "CHYBA PATCHE: Nepodařilo se opatchovat cmd_audit_log v apache2_config.c!"
+if ($cfgNew -eq $cfg) {
+    throw "CHYBA PATCHE: Nepodařilo se najít definici funkce cmd_audit_log v apache2_config.c!"
 }
+
+Set-Content -Path $cfgFile -Value $cfgNew -NoNewline
 Write-Host "OVĚŘENO: cmd_audit_log v apache2_config.c úspěšně upraven pro APR zápis."
-
-
 Write-Host "HOTOVO"
