@@ -63,19 +63,23 @@ jobs:
           candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "ModSec32.wxs"
           light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
 
-          # 3. Příprava čistě 32-bit XML šablony (odstranění všech x64 prvků z installer.wxs)
+                    # 3. Příprava čistě 32-bit XML šablony (odstranění všech x64 prvků a referencí)
           [xml]$xml = Get-Content "installer.wxs" -Raw
           $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
           $ns.AddNamespace("wix", $xml.DocumentElement.NamespaceURI)
 
           $xpathToRemove = @(
             "//wix:Component[@Win64='yes']",
+            "//wix:Component[contains(@Id, '64') or contains(@Directory, '64')]",
             "//wix:ComponentRef[contains(@Id, '64')]",
             "//wix:ComponentGroupRef[@Id='ModSec64Components']",
             "//wix:Directory[@Id='System64Folder']",
             "//wix:Directory[contains(@Id, '64')]",
-            "//wix:Merge[contains(@Id, 'x64')]",
-            "//wix:MergeRef[contains(@Id, 'x64')]"
+            "//wix:DirectoryRef[contains(@Id, '64')]",
+            "//wix:Merge[contains(@Id, 'x64') or contains(@Id, 'amd64')]",
+            "//wix:MergeRef[contains(@Id, 'x64') or contains(@Id, 'amd64')]",
+            "//wix:CustomAction[contains(@Id, '64') or contains(@Directory, '64')]",
+            "//wix:Custom[contains(@Action, '64')]"
           )
 
           foreach ($xpath in $xpathToRemove) {
