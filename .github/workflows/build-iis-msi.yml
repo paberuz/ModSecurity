@@ -29,7 +29,7 @@ jobs:
         shell: cmd
         run: build_release.bat
 
-      - name: Build MSI (x64 and x86)
+            - name: Build MSI (x64 and x86)
         working-directory: iis
         shell: pwsh
         run: |
@@ -63,17 +63,35 @@ jobs:
           candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "ModSec32.wxs"
           light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
 
-          # 3. Sestavení čistě 32-bit MSI (pokud existuje šablona installer32.wxs nebo úprava installer.wxs)
-          if (Test-Path "installer32.wxs") {
-            candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "installer32.wxs" "ModSec32.wxs"
-            light.exe -ext WixUtilExtension -ext WixUIExtension "installer32.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
-          } else {
-            # Odstranění 64-bit komponent ze šablony installer.wxs pro čistý x86 build
-            $wxs32 = (Get-Content "installer.wxs" -Raw) -replace '<ComponentGroupRef Id="ModSec64Components"\s*/>', ''
-            Set-Content "installer_x86.wxs" $wxs32 -NoNewline
-            candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "installer_x86.wxs" "ModSec32.wxs"
-            light.exe -ext WixUtilExtension -ext WixUIExtension "installer_x86.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
+          # 3. Příprava čistě 32-bit XML šablony (odstranění všech x64 prvků z installer.wxs)
+          [xml]$xml = Get-Content "installer.wxs" -Raw
+          $ns = New-Object System.Xml.XmlNamespaceManager($xml.NameTable)
+          $ns.AddNamespace("wix", $xml.DocumentElement.NamespaceURI)
+
+          $xpathToRemove = @(
+            "//wix:Component[@Win64='yes']",
+            "//wix:ComponentRef[contains(@Id, '64')]",
+            "//wix:ComponentGroupRef[@Id='ModSec64Components']",
+            "//wix:Directory[@Id='System64Folder']",
+            "//wix:Directory[contains(@Id, '64')]",
+            "//wix:Merge[contains(@Id, 'x64')]",
+            "//wix:MergeRef[contains(@Id, 'x64')]"
+          )
+
+          foreach ($xpath in $xpathToRemove) {
+            $nodes = $xml.SelectNodes($xpath, $ns)
+            foreach ($node in $nodes) {
+              if ($node.ParentNode) {
+                [void]$node.ParentNode.RemoveChild($node)
+              }
+            }
           }
+
+          $xml.Save((Join-Path (Get-Location) "installer_x86.wxs"))
+
+          # 4. Sestavení čistě 32-bit MSI
+          candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "installer_x86.wxs" "ModSec32.wxs"
+          light.exe -ext WixUtilExtension -ext WixUIExtension "installer_x86.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
 
       - name: Upload MSI
         uses: actions/upload-artifact@v4
