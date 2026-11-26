@@ -64,9 +64,9 @@ $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_
 $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
 Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-# 1. Úprava apache2_config.c: povolí SecAuditLog v IIS a uloží cestu k souboru
+# 1. Úprava apache2_config.c: povolí SecAuditLog v IIS a nastaví sériový typ logu
 $cfg = Get-Content "apache2\apache2_config.c" -Raw
-$cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog_name = (char *)p1; return NULL;"
+$cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog_name = (char *)p1; ((directory_config *)_dcfg)->auditlog_type = AUDITLOG_SERIAL; return NULL;"
 $cfg = $cfg -replace '(cmd_audit_log2\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog2_name = (char *)p1; return NULL;"
 $cfg = $cfg -replace 'Command failed to execute', 'OK_IIS_AUDIT'
 Set-Content "apache2\apache2_config.c" $cfg -NoNewline
@@ -81,7 +81,6 @@ $logFile = "apache2\msc_logging.c"
 $logCode = Get-Content $logFile -Raw
 
 $winLoggerFunc = @"
-#ifdef VERSION_IIS
 #include <windows.h>
 static apr_status_t iis_direct_audit_write(apr_file_t *fd, const void *buf, apr_size_t *nbytes) {
     if (!buf || !nbytes || *nbytes == 0) return APR_SUCCESS;
@@ -101,20 +100,27 @@ static apr_status_t iis_direct_audit_write(apr_file_t *fd, const void *buf, apr_
     }
     return APR_SUCCESS;
 }
-#endif
 "@
 
 # Vložíme pomocnou funkci před sec_audit_logger
 $logCode = $logCode -replace '(void\s+sec_audit_logger\s*\()', "$winLoggerFunc`r`n`$1"
 
-# Uvnitř sec_audit_logger obejdeme kontrolu na neotevřený auditlog_fd a přesměrujeme apr_file_write
-$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*\{[^}]*return;[^}]*\}', '/* IIS: auditlog_fd bypass */'
+# Obejdeme VŠECHNY kontroly na neotevřený auditlog_fd (se závorkami i bez nich)
+$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*return\s*;', '/* IIS: auditlog_fd bypass 1 */'
+$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*\{[^}]*\}', '/* IIS: auditlog_fd bypass 2 */'
+
+# Přesměrujeme zápis do souboru na naši funkci
 $logCode = $logCode -replace 'apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,', 'iis_direct_audit_write(msr->txcfg->auditlog_fd,'
 
 Set-Content -Path $logFile -Value $logCode -NoNewline
 
-if (-not (Select-String -Path $logFile -Pattern "iis_direct_audit_write" -Quiet)) {
-    throw "CHYBA PATCHE: Nepodařilo se vložit iis_direct_audit_write do msc_logging.c!"
+# Přísná kontrola před kompilací, že oba zásahy v msc_logging.c proběhly
+if (-not (Select-String -Path $logFile -Pattern "iis_direct_audit_write\(msr->txcfg->auditlog_fd" -Quiet)) {
+    throw "CHYBA PATCHE: Nepodařilo se nahradit apr_file_write v msc_logging.c!"
 }
-Write-Host "OVĚŘENO: Standardní audit log přesměrován do C:\inetpub\logs\ModSecurity\modsec_audit.log v msc_logging.c"
+if (Select-String -Path $logFile -Pattern "msr->txcfg->auditlog_fd\s*==\s*NULL" -Quiet) {
+    throw "CHYBA PATCHE: V msc_logging.c stále zůstala podmínka auditlog_fd == NULL!"
+}
+
+Write-Host "OVĚŘENO: msc_logging.c úspěšně opatchován pro přímý zápis."
 Write-Host "HOTOVO"
