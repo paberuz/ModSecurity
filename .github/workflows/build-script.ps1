@@ -1,16 +1,17 @@
 $dl = Join-Path $env:USERPROFILE "Downloads"
 New-Item -ItemType Directory -Force -Path $dl | Out-Null
+
 $tmpCm = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
 if (Test-Path $tmpCm) { Remove-Item $tmpCm -Recurse -Force }
 Copy-Item "C:\Program Files\CMake" $tmpCm -Recurse
 Compress-Archive $tmpCm (Join-Path $dl "cmake-3.12.4-win32-x86.zip") -Force
 
 function Get-Pkg($f, $b64) {
-  $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
-  $d = Join-Path $dl $f
-  curl.exe -fsSL -A "Wget/1.21.4" "$u" -o "$d"
-  7z t $d | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "Chyba: $f" }
+    $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
+    $d = Join-Path $dl $f
+    curl.exe -fsSL -A "Wget/1.21.4" "$u" -o "$d"
+    7z t $d | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "Chyba: $f" }
 }
 
 Get-Pkg "pcre2-10.42.zip" "aHR0cHM6Ly9naXRodWIuY29tL1BDUkUyUHJvamVjdC9wY3JlMi9yZWxlYXNlcy9kb3dubG9hZC9wY3JlMi0xMC40Mi9wY3JlMi0xMC40Mi56aXA="
@@ -29,91 +30,91 @@ $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.e
 $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $vc64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
 $vc32 = Join-Path $vsPath "VC\Auxiliary\Build\vcvars32.bat"
+
 $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
 if (-not (Test-Path $wix)) { $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin" }
 $wix | Out-File $env:GITHUB_PATH -Append
-
 $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wix"
+
 Get-ChildItem "iis\*.bat" | ForEach-Object {
-  $t = (Get-Content $_.FullName -Raw) `
-    -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vc64 `
-    -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vc32 `
-    -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1" `
-    -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wix `
-    -replace 'pcre-8\.45', 'pcre2-10.42' -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll'
-  Set-Content $_.FullName $t -NoNewline
+    $t = (Get-Content $_.FullName -Raw) `
+        -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vc64 `
+        -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vc32 `
+        -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1" `
+        -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wix `
+        -replace 'pcre-8\.45', 'pcre2-10.42' -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll'
+    Set-Content $_.FullName $t -NoNewline
 }
 
 Get-ChildItem "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
-  $t = (Get-Content $_.FullName -Raw) `
-    -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll' `
-    -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8' `
-    -replace 'others/libinjection/src/', 'libinjection/' -replace 'others\\libinjection\\src\\', 'libinjection\'
-  Set-Content $_.FullName $t -NoNewline
+    $t = (Get-Content $_.FullName -Raw) `
+        -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll' `
+        -replace '-DVERSION_IIS', '-DVERSION_IIS -DPCRE2_CODE_UNIT_WIDTH=8' `
+        -replace 'others/libinjection/src/', 'libinjection/' -replace 'others\\libinjection\\src\\', 'libinjection\'
+    Set-Content $_.FullName $t -NoNewline
 }
 
 $li = Get-ChildItem -Filter "libinjection_html5.c" -Recurse | Select-Object -First 1
 if ($li) {
-  New-Item -ItemType Directory -Force -Path "apache2\libinjection" | Out-Null
-  Copy-Item (Join-Path $li.DirectoryName "*") "apache2\libinjection" -Force
+    New-Item -ItemType Directory -Force -Path "apache2\libinjection" | Out-Null
+    Copy-Item (Join-Path $li.DirectoryName "*") "apache2\libinjection" -Force
 }
 
 $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
 $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
 Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-# Přímá úprava cmd_audit_log a cmd_audit_log2 v apache2\apache2_config.c
+# 1. Úprava apache2_config.c: povolí SecAuditLog v IIS a uloží cestu k souboru
 $cfg = Get-Content "apache2\apache2_config.c" -Raw
 $cfg = $cfg -replace '(cmd_audit_log\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog_name = (char *)p1; return NULL;"
 $cfg = $cfg -replace '(cmd_audit_log2\s*\([^)]*\)\s*\{)', "`$1 ((directory_config *)_dcfg)->auditlog2_name = (char *)p1; return NULL;"
 $cfg = $cfg -replace 'Command failed to execute', 'OK_IIS_AUDIT'
 Set-Content "apache2\apache2_config.c" $cfg -NoNewline
 
-# Ověření před kompilací, že starý řetězec v kódu už opravdu není
 if (Select-String -Path "apache2\apache2_config.c" -Pattern "Command failed to execute" -Quiet) {
-  throw "CHYBA PATCHE: V apache2_config.c stále zůstal text Command failed to execute!"
+    throw "CHYBA PATCHE: V apache2_config.c stále zůstal text Command failed to execute!"
 }
-Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven pro přímý zápis audit logu."
+Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven."
 
+# 2. Úprava msc_logging.c: přesměrování standardního audit logu přímo do souboru přes Windows API
+$logFile = "apache2\msc_logging.c"
+$logCode = Get-Content $logFile -Raw
 
-
-# Přímý zápis do modsec_audit.log přes nativní Windows API (CreateFileA/WriteFile) bez zásahu do hlaviček
-$apiFileObj = Get-ChildItem -Path "iis" -Filter "*.cpp" | Where-Object { Select-String -Path $_.FullName -Pattern "ReportEvent" -Quiet } | Select-Object -First 1
-if (-not $apiFileObj) { throw "Nenalezen žádný .cpp soubor s ReportEvent ve složce iis/" }
-$apiFile = $apiFileObj.FullName
-Write-Host "Nalezen soubor s ReportEvent: $apiFile"
-
-$api = Get-Content $apiFile -Raw
-
-# Vyhledáme řádek s ReportEvent a vytáhneme z něj přesný název 8. parametru (pole textů události lpStrings)
-$reMatch = [regex]::Match($api, 'ReportEventA?\s*\(([^;]+)\)')
-if (-not $reMatch.Success) { throw "Nenalezeno volání ReportEvent v $apiFile" }
-$argsList = $reMatch.Groups[1].Value -split ','
-$lpStringsVar = $argsList[7].Trim()
-$wNumStringsVar = $argsList[5].Trim()
-Write-Host "Zjištěné parametry ReportEvent: počet=$wNumStringsVar, pole=$lpStringsVar"
-
-$winWriteBlock = @"
-if ($lpStringsVar) {
-    HANDLE hLog = CreateFileA("C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log", FILE_APPEND_DATA, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hLog != INVALID_HANDLE_VALUE) {
-        DWORD dwWritten = 0;
-        for (WORD i = 0; i < (WORD)($wNumStringsVar); i++) {
-            if (($lpStringsVar)[i]) {
-                WriteFile(hLog, ($lpStringsVar)[i], (DWORD)strlen(($lpStringsVar)[i]), &dwWritten, NULL);
-                WriteFile(hLog, "\r\n", 2, &dwWritten, NULL);
-            }
-        }
-        CloseHandle(hLog);
+$winLoggerFunc = @"
+#ifdef VERSION_IIS
+#include <windows.h>
+static apr_status_t iis_direct_audit_write(apr_file_t *fd, const void *buf, apr_size_t *nbytes) {
+    if (!buf || !nbytes || *nbytes == 0) return APR_SUCCESS;
+    HANDLE hFile = CreateFileA(
+        "C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log",
+        FILE_APPEND_DATA,
+        FILE_SHARE_READ | FILE_SHARE_WRITE,
+        NULL,
+        OPEN_ALWAYS,
+        FILE_ATTRIBUTE_NORMAL,
+        NULL
+    );
+    if (hFile != INVALID_HANDLE_VALUE) {
+        DWORD written = 0;
+        WriteFile(hFile, buf, (DWORD)(*nbytes), &written, NULL);
+        CloseHandle(hFile);
     }
+    return APR_SUCCESS;
 }
+#endif
 "@
 
-$api = [regex]::Replace($api, '(?m)^(.*ReportEventA?\s*\(.*)$', "$winWriteBlock`r`n`$1")
-Set-Content -Path $apiFile -Value $api -NoNewline
+# Vložíme pomocnou funkci před sec_audit_logger
+$logCode = $logCode -replace '(void\s+sec_audit_logger\s*\()', "$winLoggerFunc`r`n`$1"
 
-if (-not (Select-String -Path $apiFile -Pattern "FILE_APPEND_DATA" -Quiet)) {
-  throw "CHYBA: Blok CreateFileA se nevložil před ReportEvent!"
+# Uvnitř sec_audit_logger obejdeme kontrolu na neotevřený auditlog_fd a přesměrujeme apr_file_write
+$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*\{[^}]*return;[^}]*\}', '/* IIS: auditlog_fd bypass */'
+$logCode = $logCode -replace 'apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,', 'iis_direct_audit_write(msr->txcfg->auditlog_fd,'
+
+Set-Content -Path $logFile -Value $logCode -NoNewline
+
+if (-not (Select-String -Path $logFile -Pattern "iis_direct_audit_write" -Quiet)) {
+    throw "CHYBA PATCHE: Nepodařilo se vložit iis_direct_audit_write do msc_logging.c!"
 }
-Write-Host "OVĚŘENO: Nativní Windows zápis vložen do $apiFile"
+Write-Host "OVĚŘENO: Standardní audit log přesměrován do C:\inetpub\logs\ModSecurity\modsec_audit.log v msc_logging.c"
 Write-Host "HOTOVO"
