@@ -1,17 +1,24 @@
+$ErrorActionPreference = "Stop"
+
 $dl = Join-Path $env:USERPROFILE "Downloads"
 New-Item -ItemType Directory -Force -Path $dl | Out-Null
 
+# 1. Příprava CMake (pro x64 i x86 cesty, které skripty v ModSecurity vyžadují)
+$cmSource = "C:\Program Files\CMake"
+if (-not (Test-Path $cmSource)) { $cmSource = "${env:ProgramFiles(x86)}\CMake" }
+
 $tmpCm = Join-Path $env:TEMP "cmake-3.12.4-win32-x86"
 if (Test-Path $tmpCm) { Remove-Item $tmpCm -Recurse -Force }
-Copy-Item "C:\Program Files\CMake" $tmpCm -Recurse
+Copy-Item $cmSource $tmpCm -Recurse
 Compress-Archive $tmpCm (Join-Path $dl "cmake-3.12.4-win32-x86.zip") -Force
 
+# 2. Stažení zdrojových kódů a binárek (obsahuje 32-bit i 64-bit verze)
 function Get-Pkg($f, $b64) {
     $u = [System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($b64))
     $d = Join-Path $dl $f
     curl.exe -fsSL -A "Wget/1.21.4" "$u" -o "$d"
     7z t $d | Out-Null
-    if ($LASTEXITCODE -ne 0) { throw "Chyba: $f" }
+    if ($LASTEXITCODE -ne 0) { throw "Chyba při ověřování archivu: $f" }
 }
 
 Get-Pkg "pcre2-10.42.zip" "aHR0cHM6Ly9naXRodWIuY29tL1BDUkUyUHJvamVjdC9wY3JlMi9yZWxlYXNlcy9kb3dubG9hZC9wY3JlMi0xMC40Mi9wY3JlMi0xMC40Mi56aXA="
@@ -26,6 +33,7 @@ Get-Pkg "yajl-2.1.0.zip" "aHR0cHM6Ly9naXRodWIuY29tL2xsb3lkL3lhamwvYXJjaGl2ZS9yZW
 Get-Pkg "ssdeep-2.14.1.tar.gz" "aHR0cHM6Ly9naXRodWIuY29tL3NzZGVlcC1wcm9qZWN0L3NzZGVlcC9yZWxlYXNlcy9kb3dubG9hZC9yZWxlYXNlLTIuMTQuMS9zc2RlZXAtMi4xNC4xLnRhci5neg=="
 Get-Pkg "ssdeep-2.14.1.zip" "aHR0cHM6Ly9naXRodWIuY29tL3NzZGVlcC1wcm9qZWN0L3NzZGVlcC9yZWxlYXNlcy9kb3dubG9hZC9yZWxlYXNlLTIuMTQuMS9zc2RlZXAtMi4xNC4xLXdpbjMyLWJpbmFyeS56aXA="
 
+# 3. Detekce Visual Studia a WiX Toolsetu
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
 $vsPath = & $vswhere -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
 $vc64 = Join-Path $vsPath "VC\Auxiliary\Build\vcvarsx86_amd64.bat"
@@ -33,19 +41,23 @@ $vc32 = Join-Path $vsPath "VC\Auxiliary\Build\vcvars32.bat"
 
 $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.14\bin"
 if (-not (Test-Path $wix)) { $wix = "${env:ProgramFiles(x86)}\WiX Toolset v3.11\bin" }
-$wix | Out-File $env:GITHUB_PATH -Append
+if ($env:GITHUB_PATH) { $wix | Out-File $env:GITHUB_PATH -Append }
+
 $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wix"
 
+# 4. Úprava .bat skriptů ve složce iis\ (nastavení PATH pro 32-bit i 64-bit)
 Get-ChildItem "iis\*.bat" | ForEach-Object {
     $t = (Get-Content $_.FullName -Raw) `
         -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat', $vc64 `
         -replace 'C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvars32\.bat', $vc32 `
         -replace '(?m)^(.*vcvars32\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1" `
+        -replace '(?m)^(.*vcvarsx86_amd64\.bat.*)$', "set `"PATH=$basePath`"`r`n`$1" `
         -replace 'C:\\Program Files(?: \(x86\))?\\WiX Toolset v[0-9.]+\\bin', $wix `
         -replace 'pcre-8\.45', 'pcre2-10.42' -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll'
     Set-Content $_.FullName $t -NoNewline
 }
 
+# 5. Úprava Makefile.win a WiX souborů (.wxs) pro PCRE2 a libinjection
 Get-ChildItem "apache2", "iis", "mlogc" -Include "Makefile.win", "*.wxs" -Recurse | ForEach-Object {
     $t = (Get-Content $_.FullName -Raw) `
         -replace 'pcre\.lib', 'pcre2-8.lib' -replace 'pcre\.dll', 'pcre2-8.dll' `
@@ -60,36 +72,68 @@ if ($li) {
     Copy-Item (Join-Path $li.DirectoryName "*") "apache2\libinjection" -Force
 }
 
+# 6. Patchování zdrojových souborů (apache2_io.c a apache2_config.c)
 $io = (Get-Content "apache2\apache2_io.c" -Raw) -replace '\bap_map_http_request_error\b', 'ap_map_http_request_error_iis'
 $io += "`r`nstatic int ap_map_http_request_error_iis(apr_status_t rv, int s) { return rv==APR_EGENERAL?400:rv==APR_ENOSPC?413:rv==APR_ENOTIMPL?501:(rv==APR_ETIMEDOUT||rv==APR_TIMEUP)?408:s; }`r`n"
 Set-Content "apache2\apache2_io.c" $io -NoNewline
 
-# Oprava SecAuditLog pro IIS: otevření souboru přes standardní APR hned na začátku cmd_audit_log
 $cfgFile = "apache2\apache2_config.c"
 $cfg = Get-Content $cfgFile -Raw
-
 $aprOpenCode = @'
     directory_config *iis_dcfg = (directory_config *)_dcfg;
     iis_dcfg->auditlog_name = (char *)p1;
-    if (apr_file_open(&iis_dcfg->auditlog_fd, iis_dcfg->auditlog_name,
-        APR_WRITE | APR_APPEND | APR_CREATE | APR_BINARY,
-        APR_OS_DEFAULT, cmd->pool) != APR_SUCCESS) {
+    if (apr_file_open(&iis_dcfg->auditlog_fd, iis_dcfg->auditlog_name, APR_WRITE | APR_APPEND | APR_CREATE | APR_BINARY, APR_OS_DEFAULT, cmd->pool) != APR_SUCCESS) {
         return apr_psprintf(cmd->pool, "Failed to open audit log file: %s", iis_dcfg->auditlog_name);
     }
     return NULL;
 '@
 
-# Najde hlavičku definice funkce cmd_audit_log (končící složenou závorkou {) a vloží náš kód hned na její začátek
 $cfgNew = [regex]::Replace(
     $cfg,
     '(?m)^([^{;]*\bcmd_audit_log\s*\([^)]*\)\s*\{)',
     "`$1`r`n$aprOpenCode`r`n"
 )
 
-if ($cfgNew -eq $cfg) {
-    throw "CHYBA PATCHE: Nepodařilo se najít definici funkce cmd_audit_log v apache2_config.c!"
+if ($cfgNew -eq $cfg) { throw "CHYBA PATCHE: Nepodařilo se najít definici funkce cmd_audit_log v apache2_config.c!" }
+Set-Content -Path $cfgFile -Value $cfgNew -NoNewline
+Write-Host "OVĚŘENO: Patche úspěšně aplikovány." -ForegroundColor Green
+
+# 7. SPOUŠTĚNÍ SAMOTNÉ KOMPILACE (32-bit i 64-bit)
+$outDir = Join-Path (Get-Location) "build_output"
+New-Item -ItemType Directory -Force -Path "$outDir\x86", "$outDir\x64" | Out-Null
+
+Push-Location "iis"
+try {
+    # --- 32-BIT KOMPILACE ---
+    Write-Host "`n=== SPUŠTĚNÍ 32-BIT (x86) KOMPILACE ===" -ForegroundColor Cyan
+    if (Test-Path "build_dependencies.bat") {
+        cmd.exe /c "build_dependencies.bat x86"
+        if ($LASTEXITCODE -ne 0) { throw "Chyba při buildu 32-bit závislostí!" }
+    }
+    if (Test-Path "build_modsecurity.bat") {
+        cmd.exe /c "build_modsecurity.bat x86"
+        if ($LASTEXITCODE -ne 0) { throw "Chyba při buildu 32-bit ModSecurity!" }
+    }
+    # Záloha 32-bit výsledků před spuštěním 64-bit buildu
+    Get-ChildItem -Filter "*.msi" -Recurse | Copy-Item -Destination "$outDir\x86" -Force
+    Get-ChildItem -Filter "ModSecurityIIS.dll" -Recurse | Copy-Item -Destination "$outDir\x86" -Force
+
+    # --- 64-BIT KOMPILACE ---
+    Write-Host "`n=== SPUŠTĚNÍ 64-BIT (x64) KOMPILACE ===" -ForegroundColor Cyan
+    if (Test-Path "build_dependencies.bat") {
+        cmd.exe /c "build_dependencies.bat x64"
+        if ($LASTEXITCODE -ne 0) { throw "Chyba při buildu 64-bit závislostí!" }
+    }
+    if (Test-Path "build_modsecurity.bat") {
+        cmd.exe /c "build_modsecurity.bat x64"
+        if ($LASTEXITCODE -ne 0) { throw "Chyba při buildu 64-bit ModSecurity!" }
+    }
+    # Záloha 64-bit výsledků
+    Get-ChildItem -Filter "*.msi" -Recurse | Where-Object { $_.FullName -notlike "*build_output*" } | Copy-Item -Destination "$outDir\x64" -Force
+    Get-ChildItem -Filter "ModSecurityIIS.dll" -Recurse | Where-Object { $_.FullName -notlike "*build_output*" } | Copy-Item -Destination "$outDir\x64" -Force
+}
+finally {
+    Pop-Location
 }
 
-Set-Content -Path $cfgFile -Value $cfgNew -NoNewline
-Write-Host "OVĚŘENO: cmd_audit_log v apache2_config.c úspěšně upraven pro APR zápis."
-Write-Host "HOTOVO"
+Write-Host "`nHOTOVO! Zkompilované soubory (x86 a x64) najdete ve složce: $outDir" -ForegroundColor Green
