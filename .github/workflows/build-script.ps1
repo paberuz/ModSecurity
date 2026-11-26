@@ -69,12 +69,12 @@ $cfgFile = "apache2\apache2_config.c"
 $cfg = Get-Content $cfgFile -Raw
 
 $aprOpenCode = @'
-    directory_config *dcfg = (directory_config *)_dcfg;
-    dcfg->auditlog_name = (char *)p1;
-    if (apr_file_open(&dcfg->auditlog_fd, dcfg->auditlog_name,
+    directory_config *iis_dcfg = (directory_config *)_dcfg;
+    iis_dcfg->auditlog_name = (char *)p1;
+    if (apr_file_open(&iis_dcfg->auditlog_fd, iis_dcfg->auditlog_name,
         APR_WRITE | APR_APPEND | APR_CREATE | APR_BINARY,
         APR_OS_DEFAULT, cmd->pool) != APR_SUCCESS) {
-        return apr_psprintf(cmd->pool, "Failed to open audit log file: %s", dcfg->auditlog_name);
+        return apr_psprintf(cmd->pool, "Failed to open audit log file: %s", iis_dcfg->auditlog_name);
     }
     return NULL;
 '@
