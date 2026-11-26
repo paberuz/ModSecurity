@@ -20,7 +20,6 @@ jobs:
         with:
           path: scripts
 
-
       - name: Prepare and Patch
         shell: pwsh
         run: .\scripts\.github\workflows\build-script.ps1
@@ -30,7 +29,7 @@ jobs:
         shell: cmd
         run: build_release.bat
 
-      - name: Build MSI
+      - name: Build MSI (x64 and x86)
         working-directory: iis
         shell: pwsh
         run: |
@@ -55,14 +54,31 @@ jobs:
           $p32 = Get-ChildItem "dependencies" -Filter "pcre2-8.dll" -Recurse | Select-Object -First 1
           if ($p32) { Copy-Item $p32.FullName "release\x86\pcre2-8.dll" -Force }
 
+          # 1. Generování komponent pro x64 a x86
           heat.exe dir "release\amd64" -cg ModSec64Components -dr inetsrv64 -gg -sreg -srd -var var.ModSecurityIISRelease64 -out "ModSec64.wxs"
           heat.exe dir "release\x86" -cg ModSec32Components -dr inetsrv32 -gg -sreg -srd -var var.ModSecurityIISRelease32 -out "ModSec32.wxs"
+
+          # 2. Sestavení 64-bit MSI (obsahuje x64 + x86 WOW64)
           candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease64="release\amd64" -arch x64 "installer.wxs" "ModSec64.wxs"
           candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "ModSec32.wxs"
           light.exe -ext WixUtilExtension -ext WixUIExtension "installer.wixobj" "ModSec64.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x64.msi"
+
+          # 3. Sestavení čistě 32-bit MSI (pokud existuje šablona installer32.wxs nebo úprava installer.wxs)
+          if (Test-Path "installer32.wxs") {
+            candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "installer32.wxs" "ModSec32.wxs"
+            light.exe -ext WixUtilExtension -ext WixUIExtension "installer32.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
+          } else {
+            # Odstranění 64-bit komponent ze šablony installer.wxs pro čistý x86 build
+            $wxs32 = (Get-Content "installer.wxs" -Raw) -replace '<ComponentGroupRef Id="ModSec64Components"\s*/>', ''
+            Set-Content "installer_x86.wxs" $wxs32 -NoNewline
+            candle.exe -ext WixUtilExtension -ext WixUIExtension -dModSecurityIISRelease32="release\x86" -arch x86 "installer_x86.wxs" "ModSec32.wxs"
+            light.exe -ext WixUtilExtension -ext WixUIExtension "installer_x86.wixobj" "ModSec32.wixobj" -out "ModSecurityIIS-2.9.15-x86.msi"
+          }
 
       - name: Upload MSI
         uses: actions/upload-artifact@v4
         with:
           name: ModSecurity-IIS-MSI
-          path: iis/**/*.msi
+          path: |
+            iis/**/*.msi
+            iis/release/**/*.dll
