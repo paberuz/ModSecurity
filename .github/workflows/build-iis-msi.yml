@@ -29,7 +29,7 @@ jobs:
         shell: cmd
         run: build_release.bat
 
-            - name: Build MSI (x64 and x86)
+      - name: Build MSI (x64 and x86)
         working-directory: iis
         shell: pwsh
         run: |
