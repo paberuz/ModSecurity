@@ -76,50 +76,41 @@ if (Select-String -Path "apache2\apache2_config.c" -Pattern "Command failed to e
 }
 Write-Host "OVĚŘENO: apache2_config.c úspěšně upraven."
 
-# 2. Úprava msc_logging.c: přesměrování standardního audit logu přímo do souboru přes Windows API
+# 2. Úprava msc_logging.c: přesměrování funkce sec_auditlog_write přímo do souboru přes Windows API
 $logFile = "apache2\msc_logging.c"
 $logCode = Get-Content $logFile -Raw
 
-$winLoggerFunc = @"
-#include <windows.h>
-static apr_status_t iis_direct_audit_write(apr_file_t *fd, const void *buf, apr_size_t *nbytes) {
-    if (!buf || !nbytes || *nbytes == 0) return APR_SUCCESS;
-    HANDLE hFile = CreateFileA(
-        "C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log",
-        FILE_APPEND_DATA,
-        FILE_SHARE_READ | FILE_SHARE_WRITE,
-        NULL,
-        OPEN_ALWAYS,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-    if (hFile != INVALID_HANDLE_VALUE) {
-        DWORD written = 0;
-        WriteFile(hFile, buf, (DWORD)(*nbytes), &written, NULL);
-        CloseHandle(hFile);
+$winWriteReplacement = @"
+    if (msr->new_auditlog_fd == NULL) {
+        HANDLE hFile = CreateFileA(
+            (msr->txcfg->auditlog_name != NULL) ? msr->txcfg->auditlog_name : "C:\\inetpub\\logs\\ModSecurity\\modsec_audit.log",
+            FILE_APPEND_DATA,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            NULL,
+            OPEN_ALWAYS,
+            FILE_ATTRIBUTE_NORMAL,
+            NULL
+        );
+        if (hFile != INVALID_HANDLE_VALUE) {
+            DWORD written = 0;
+            WriteFile(hFile, data, (DWORD)len, &written, NULL);
+            CloseHandle(hFile);
+        }
+        return 1;
     }
-    return APR_SUCCESS;
-}
 "@
 
-# Vložíme pomocnou funkci před sec_audit_logger
-$logCode = $logCode -replace '(void\s+sec_audit_logger\s*\()', "$winLoggerFunc`r`n`$1"
-
-# Obejdeme VŠECHNY kontroly na neotevřený auditlog_fd (se závorkami i bez nich)
-$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*return\s*;', '/* IIS: auditlog_fd bypass 1 */'
-$logCode = $logCode -replace 'if\s*\(\s*msr->txcfg->auditlog_fd\s*==\s*NULL\s*\)\s*\{[^}]*\}', '/* IIS: auditlog_fd bypass 2 */'
-
-# Přesměrujeme zápis do souboru na naši funkci
-$logCode = $logCode -replace 'apr_file_write\s*\(\s*msr->txcfg->auditlog_fd\s*,', 'iis_direct_audit_write(msr->txcfg->auditlog_fd,'
+# Nahradíme přesný řádek kontroly NULL deskriptoru uvnitř sec_auditlog_write
+$logCode = $logCode -replace 'if\s*\(\s*msr->new_auditlog_fd\s*==\s*NULL\s*\)\s*return\s*-1\s*;', $winWriteReplacement
 
 Set-Content -Path $logFile -Value $logCode -NoNewline
 
-# Přísná kontrola před kompilací, že oba zásahy v msc_logging.c proběhly
-if (-not (Select-String -Path $logFile -Pattern "iis_direct_audit_write\(msr->txcfg->auditlog_fd" -Quiet)) {
-    throw "CHYBA PATCHE: Nepodařilo se nahradit apr_file_write v msc_logging.c!"
+# Přísná kontrola před kompilací, že se zásah v msc_logging.c opravdu provedl
+if (-not (Select-String -Path $logFile -Pattern "FILE_APPEND_DATA" -Quiet)) {
+    throw "CHYBA PATCHE: Nepodařilo se opatchovat sec_auditlog_write v msc_logging.c!"
 }
-if (Select-String -Path $logFile -Pattern "msr->txcfg->auditlog_fd\s*==\s*NULL" -Quiet) {
-    throw "CHYBA PATCHE: V msc_logging.c stále zůstala podmínka auditlog_fd == NULL!"
+if (Select-String -Path $logFile -Pattern "if\s*\(\s*msr->new_auditlog_fd\s*==\s*NULL\s*\)\s*return\s*-1\s*;" -Quiet) {
+    throw "CHYBA PATCHE: V msc_logging.c stále zůstal původní return -1!"
 }
 
 Write-Host "OVĚŘENO: msc_logging.c úspěšně opatchován pro přímý zápis."
