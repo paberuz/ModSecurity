@@ -3,7 +3,7 @@ $ErrorActionPreference = "Stop"
 $dl = Join-Path $env:USERPROFILE "Downloads"
 New-Item -ItemType Directory -Force -Path $dl | Out-Null
 
-# 1. Příprava CMake
+# 1. Příprava CMake (pro x64 i x86 cesty)
 $cmSource = "C:\Program Files\CMake"
 if (-not (Test-Path $cmSource)) { $cmSource = "${env:ProgramFiles(x86)}\CMake" }
 
@@ -45,7 +45,7 @@ if ($env:GITHUB_PATH) { $wix | Out-File $env:GITHUB_PATH -Append }
 
 $basePath = "$env:SystemRoot\system32;$env:SystemRoot;$env:SystemRoot\System32\Wbem;C:\Program Files\Git\cmd;C:\Program Files\7-Zip;$wix"
 
-# 4. Úprava .bat skriptů ve složce iis\ (včetně opravy uvozovek pro cesty s mezerami)
+# 4. Úprava .bat skriptů ve složce iis\
 Get-ChildItem "iis\*.bat" | ForEach-Object {
     $t = (Get-Content $_.FullName -Raw) `
         -replace '"?C:\\Program Files(?: \(x86\))?\\Microsoft Visual Studio\\[^"\\]+\\[^"\\]+\\VC\\Auxiliary\\Build\\vcvarsx86_amd64\.bat"?', "`"$vc64`"" `
@@ -96,7 +96,5 @@ $cfgNew = [regex]::Replace(
 
 if ($cfgNew -eq $cfg) { throw "CHYBA PATCHE: Nepodařilo se najít definici funkce cmd_audit_log v apache2_config.c!" }
 Set-Content -Path $cfgFile -Value $cfgNew -NoNewline
-Write-Host "OVĚŘENO: Patche úspěšně aplikovány." -ForegroundColor Green
-
-
-Write-Host "`nHOTOVO! Zkompilované soubory najdete ve složce: $outDir" -ForegroundColor Green
+Write-Host "OVĚŘENO: Patche úspěšně aplikovány."
+Write-Host "HOTOVO"
